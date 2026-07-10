@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ztt import __version__
+from ztt.dependencies import analyze_lld_dependencies
 from ztt.lld import list_discovery_rules, move_discovery_rules
 from ztt.loader import load_template
 from ztt.template import TemplateFormatError
@@ -118,6 +119,47 @@ def list_lld(
         )
     console.print(table)
     if not rules:
+        console.print("[yellow]No discovery rule found.[/yellow]")
+
+
+@app.command("analyze")
+def analyze(
+    template_file: Annotated[
+        Path,
+        typer.Argument(
+            exists=False,
+            dir_okay=False,
+            readable=True,
+            help="Zabbix YAML export.",
+        ),
+    ],
+) -> None:
+    """Analyze external dependencies referenced by discovery rules."""
+    try:
+        template = load_template(template_file)
+        reports = analyze_lld_dependencies(template)
+    except (FileNotFoundError, PermissionError, TemplateFormatError) as exc:
+        _exit_with_error(exc)
+
+    for report in reports:
+        table = Table(title=f"{report.rule_name} — {report.rule_key}")
+        table.add_column("Status")
+        table.add_column("Type")
+        table.add_column("Reference")
+        table.add_column("Location")
+        for dependency in report.dependencies:
+            status = "[green]OK[/green]" if dependency.present else "[red]MISSING[/red]"
+            table.add_row(
+                status,
+                dependency.kind,
+                dependency.reference,
+                dependency.location,
+            )
+        console.print(table)
+        if not report.dependencies:
+            console.print("[dim]No external dependency detected.[/dim]")
+
+    if not reports:
         console.print("[yellow]No discovery rule found.[/yellow]")
 
 
