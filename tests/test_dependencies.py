@@ -1,8 +1,7 @@
 from pathlib import Path
 
-from ztt.loader import load_template
-
 from ztt.dependencies import analyze_lld_dependencies
+from ztt.loader import load_template
 
 
 def test_analyze_lld_dependencies(tmp_path: Path) -> None:
