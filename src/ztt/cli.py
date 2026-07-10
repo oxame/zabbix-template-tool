@@ -6,11 +6,11 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.table import Table
+from ztt.loader import load_template
+from ztt.template import TemplateFormatError
 
 from ztt import __version__
 from ztt.lld import list_discovery_rules, move_discovery_rules
-from ztt.loader import load_template
-from ztt.template import TemplateFormatError
 
 app = typer.Typer(
     name="ztt",
