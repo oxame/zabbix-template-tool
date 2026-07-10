@@ -13,9 +13,12 @@ BASE (collection) -> SYSTEM (system LLD and triggers) -> BUSINESS (business serv
 - Load a Zabbix YAML export.
 - Validate its basic structure.
 - Display template metadata and object counts.
-- Preserve YAML ordering and formatting through `ruamel.yaml`.
-
-The first refactoring feature planned is moving selected LLD rules from a BASE template to a SYSTEM template with their prototypes and dependencies.
+- List LLD rules with nested item, trigger and graph prototype counts.
+- Move selected LLD rules between templates.
+- Preserve the complete LLD block, including preprocessing, filters, prototypes and overrides.
+- Simulate changes before writing.
+- Create `.bak` backups before modifying source files.
+- Preserve YAML ordering and quotes through `ruamel.yaml`.
 
 ## Installation for development
 
@@ -37,27 +40,56 @@ pip install -e ".[dev]"
 
 ## Usage
 
+### Inspect a template
+
 ```bash
-ztt --version
 ztt info path/to/template.yaml
 ```
 
-Example output:
+### List its LLD rules
 
-```text
-File            template.yaml
-Export version  7.4
-Template        TEMPLATE_TEST_BASE
-Visible name    Test Base
-
-Objects
-Items                   1
-Discovery rules (LLD)   1
-Triggers                0
-Graphs                  0
-Dashboards              0
-Macros                   1
+```bash
+ztt list-lld BASE.yaml
 ```
+
+The table displays each rule name and key together with the number of embedded item prototypes, trigger prototypes, graph prototypes and overrides.
+
+### Simulate an LLD move
+
+A selector can be the exact LLD name, key or UUID:
+
+```bash
+ztt move-lld BASE.yaml SYSTEM.yaml --select "Filesystem discovery"
+ztt move-lld BASE.yaml SYSTEM.yaml --select vfs.fs.discovery
+```
+
+Several selectors can be supplied:
+
+```bash
+ztt move-lld BASE.yaml SYSTEM.yaml \
+  --select vfs.fs.discovery \
+  --select net.if.discovery
+```
+
+Move every discovery rule:
+
+```bash
+ztt move-lld BASE.yaml SYSTEM.yaml --all
+```
+
+These commands only simulate the operation. Add `--apply` to write both files:
+
+```bash
+ztt move-lld BASE.yaml SYSTEM.yaml --select vfs.fs.discovery --apply
+```
+
+By default, `BASE.yaml.bak` and `SYSTEM.yaml.bak` are created before writing. Use `--no-backup` only when backups are managed elsewhere:
+
+```bash
+ztt move-lld BASE.yaml SYSTEM.yaml --all --apply --no-backup
+```
+
+The destination is rejected if it already contains a rule with the same UUID or key.
 
 ## Tests and linting
 
@@ -68,9 +100,9 @@ ruff check .
 
 ## Roadmap
 
-- `v0.1`: inspection and structural validation.
-- `v0.2`: move LLD rules and embedded prototypes between templates.
-- `v0.3`: dependency analysis, macros and referenced objects.
+- `v0.1`: inspection, structural validation and atomic LLD moves.
+- `v0.2`: dependency analysis for external macros, value maps and master items.
+- `v0.3`: move standalone items, triggers, graphs and macros.
 - `v0.4`: split and merge layered templates.
 - `v1.0`: graphical interface.
 

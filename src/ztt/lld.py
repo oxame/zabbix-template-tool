@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from shutil import copy2
 from typing import Any
 
@@ -42,7 +41,8 @@ def _as_list(value: Any) -> list[Any]:
 def list_discovery_rules(template: ZabbixTemplate) -> list[DiscoveryRuleInfo]:
     """Return normalized information about all discovery rules."""
     result: list[DiscoveryRuleInfo] = []
-    for index, rule in enumerate(_as_list(template.template.get("discovery_rules")), start=1):
+    rules = _as_list(template.template.get("discovery_rules"))
+    for index, rule in enumerate(rules, start=1):
         if not isinstance(rule, dict):
             continue
         result.append(
@@ -62,6 +62,27 @@ def list_discovery_rules(template: ZabbixTemplate) -> list[DiscoveryRuleInfo]:
 
 def _rule_identity(rule: dict[str, Any]) -> tuple[str, str]:
     return str(rule.get("uuid", "")), str(rule.get("key", ""))
+
+
+def _rules_conflict(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_uuid, left_key = _rule_identity(left)
+    right_uuid, right_key = _rule_identity(right)
+    same_uuid = bool(left_uuid and left_uuid == right_uuid)
+    same_key = bool(left_key and left_key == right_key)
+    return same_uuid or same_key
+
+
+def _fallback_info(rule: dict[str, Any]) -> DiscoveryRuleInfo:
+    return DiscoveryRuleInfo(
+        index=0,
+        name=str(rule.get("name", "unnamed")),
+        key=str(rule.get("key", "")),
+        uuid=str(rule.get("uuid", "")),
+        item_prototypes=0,
+        trigger_prototypes=0,
+        graph_prototypes=0,
+        overrides=0,
+    )
 
 
 def move_discovery_rules(
@@ -92,41 +113,48 @@ def move_discovery_rules(
         if not isinstance(rule, dict):
             retained.append(rule)
             continue
-        matches = move_all or bool(
-            selectors_set.intersection(
-                {
-                    str(rule.get("uuid", "")),
-                    str(rule.get("key", "")),
-                    str(rule.get("name", "")),
-                }
-            )
-        )
+        identities = {
+            str(rule.get("uuid", "")),
+            str(rule.get("key", "")),
+            str(rule.get("name", "")),
+        }
+        matches = move_all or bool(selectors_set.intersection(identities))
         (selected if matches else retained).append(rule)
 
     if not selected:
         raise TemplateFormatError("No discovery rule matched the requested selector(s).")
 
-    existing = {_rule_identity(rule) for rule in destination_rules if isinstance(rule, dict)}
-    duplicates = [rule for rule in selected if _rule_identity(rule) in existing]
+    destination_mappings = [
+        rule for rule in destination_rules if isinstance(rule, dict)
+    ]
+    duplicates = [
+        rule
+        for rule in selected
+        if any(_rules_conflict(rule, existing) for existing in destination_mappings)
+    ]
     if duplicates:
-        labels = ", ".join(str(rule.get("name", rule.get("key", "unnamed"))) for rule in duplicates)
-        raise TemplateFormatError(f"Destination already contains matching LLD rule(s): {labels}")
+        labels = ", ".join(
+            str(rule.get("name", rule.get("key", "unnamed")))
+            for rule in duplicates
+        )
+        message = f"Destination already contains matching LLD rule(s): {labels}"
+        raise TemplateFormatError(message)
 
     infos_by_identity = {
         (info.uuid, info.key): info for info in list_discovery_rules(source)
     }
     moved_infos = tuple(
-        infos_by_identity.get(
-            _rule_identity(rule),
-            DiscoveryRuleInfo(0, str(rule.get("name", "unnamed")), str(rule.get("key", "")), str(rule.get("uuid", "")), 0, 0, 0, 0),
-        )
+        infos_by_identity.get(_rule_identity(rule), _fallback_info(rule))
         for rule in selected
     )
 
     if not dry_run:
         if backup:
             copy2(source.path, source.path.with_suffix(source.path.suffix + ".bak"))
-            copy2(destination.path, destination.path.with_suffix(destination.path.suffix + ".bak"))
+            copy2(
+                destination.path,
+                destination.path.with_suffix(destination.path.suffix + ".bak"),
+            )
 
         if retained:
             source.template["discovery_rules"] = retained

@@ -30,7 +30,12 @@ def version_callback(value: bool) -> None:
 def main(
     version: Annotated[
         bool,
-        typer.Option("--version", callback=version_callback, is_eager=True, help="Show version."),
+        typer.Option(
+            "--version",
+            callback=version_callback,
+            is_eager=True,
+            help="Show version.",
+        ),
     ] = False,
 ) -> None:
     """Zabbix Template Tool."""
@@ -40,7 +45,12 @@ def main(
 def info(
     template_file: Annotated[
         Path,
-        typer.Argument(exists=False, dir_okay=False, readable=True, help="Zabbix YAML export."),
+        typer.Argument(
+            exists=False,
+            dir_okay=False,
+            readable=True,
+            help="Zabbix YAML export.",
+        ),
     ],
 ) -> None:
     """Display a summary of the first template contained in a YAML export."""
@@ -72,7 +82,12 @@ def info(
 def list_lld(
     template_file: Annotated[
         Path,
-        typer.Argument(exists=False, dir_okay=False, readable=True, help="Zabbix YAML export."),
+        typer.Argument(
+            exists=False,
+            dir_okay=False,
+            readable=True,
+            help="Zabbix YAML export.",
+        ),
     ],
 ) -> None:
     """List low-level discovery rules and their nested prototype counts."""
@@ -82,7 +97,8 @@ def list_lld(
     except (FileNotFoundError, PermissionError, TemplateFormatError) as exc:
         _exit_with_error(exc)
 
-    table = Table(title=f"LLD rules — {template.template.get('name', template.path.name)}")
+    title = template.template.get("name", template.path.name)
+    table = Table(title=f"LLD rules — {title}")
     table.add_column("#", justify="right")
     table.add_column("Name")
     table.add_column("Key")
@@ -109,7 +125,12 @@ def list_lld(
 def move_lld(
     source_file: Annotated[
         Path,
-        typer.Argument(exists=False, dir_okay=False, readable=True, help="Source YAML export."),
+        typer.Argument(
+            exists=False,
+            dir_okay=False,
+            readable=True,
+            help="Source YAML export.",
+        ),
     ],
     destination_file: Annotated[
         Path,
@@ -125,7 +146,7 @@ def move_lld(
         typer.Option(
             "--select",
             "-s",
-            help="Exact LLD name, key, or UUID. Repeat this option to move several rules.",
+            help="Exact LLD name, key, or UUID. Repeat to move several rules.",
         ),
     ] = None,
     move_all: Annotated[
@@ -134,11 +155,17 @@ def move_lld(
     ] = False,
     apply: Annotated[
         bool,
-        typer.Option("--apply", help="Write the changes. Without this flag, only simulate."),
+        typer.Option(
+            "--apply",
+            help="Write the changes. Without this flag, only simulate.",
+        ),
     ] = False,
     backup: Annotated[
         bool,
-        typer.Option("--backup/--no-backup", help="Create .bak copies before writing."),
+        typer.Option(
+            "--backup/--no-backup",
+            help="Create .bak copies before writing.",
+        ),
     ] = True,
 ) -> None:
     """Move complete LLD rule blocks from one template export to another."""
@@ -163,7 +190,9 @@ def move_lld(
     console.print(f"Source rules remaining: {result.source_remaining}")
     console.print(f"Destination rules after move: {result.destination_total}")
     if result.dry_run:
-        console.print("[yellow]No file changed. Add --apply to perform the move.[/yellow]")
+        console.print(
+            "[yellow]No file changed. Add --apply to perform the move.[/yellow]"
+        )
 
 
 def _exit_with_error(exc: Exception) -> None:
