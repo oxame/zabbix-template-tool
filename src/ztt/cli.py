@@ -148,7 +148,11 @@ def analyze(
         table.add_column("Reference")
         table.add_column("Location")
         for dependency in report.dependencies:
-            status = "[green]OK[/green]" if dependency.present else "[red]MISSING[/red]"
+            status = (
+                "[green]OK[/green]"
+                if dependency.present
+                else "[red]MISSING[/red]"
+            )
             table.add_row(
                 status,
                 dependency.kind,
