@@ -41,7 +41,8 @@ def _as_list(value: Any) -> list[Any]:
 def list_discovery_rules(template: ZabbixTemplate) -> list[DiscoveryRuleInfo]:
     """Return normalized information about all discovery rules."""
     result: list[DiscoveryRuleInfo] = []
-    for index, rule in enumerate(_as_list(template.template.get("discovery_rules")), start=1):
+    rules = _as_list(template.template.get("discovery_rules"))
+    for index, rule in enumerate(rules, start=1):
         if not isinstance(rule, dict):
             continue
         result.append(
@@ -66,7 +67,9 @@ def _rule_identity(rule: dict[str, Any]) -> tuple[str, str]:
 def _rules_conflict(left: dict[str, Any], right: dict[str, Any]) -> bool:
     left_uuid, left_key = _rule_identity(left)
     right_uuid, right_key = _rule_identity(right)
-    return bool((left_uuid and left_uuid == right_uuid) or (left_key and left_key == right_key))
+    same_uuid = bool(left_uuid and left_uuid == right_uuid)
+    same_key = bool(left_key and left_key == right_key)
+    return same_uuid or same_key
 
 
 def _fallback_info(rule: dict[str, Any]) -> DiscoveryRuleInfo:
@@ -110,21 +113,20 @@ def move_discovery_rules(
         if not isinstance(rule, dict):
             retained.append(rule)
             continue
-        matches = move_all or bool(
-            selectors_set.intersection(
-                {
-                    str(rule.get("uuid", "")),
-                    str(rule.get("key", "")),
-                    str(rule.get("name", "")),
-                }
-            )
-        )
+        identities = {
+            str(rule.get("uuid", "")),
+            str(rule.get("key", "")),
+            str(rule.get("name", "")),
+        }
+        matches = move_all or bool(selectors_set.intersection(identities))
         (selected if matches else retained).append(rule)
 
     if not selected:
         raise TemplateFormatError("No discovery rule matched the requested selector(s).")
 
-    destination_mappings = [rule for rule in destination_rules if isinstance(rule, dict)]
+    destination_mappings = [
+        rule for rule in destination_rules if isinstance(rule, dict)
+    ]
     duplicates = [
         rule
         for rule in selected
@@ -132,21 +134,27 @@ def move_discovery_rules(
     ]
     if duplicates:
         labels = ", ".join(
-            str(rule.get("name", rule.get("key", "unnamed"))) for rule in duplicates
+            str(rule.get("name", rule.get("key", "unnamed")))
+            for rule in duplicates
         )
-        raise TemplateFormatError(f"Destination already contains matching LLD rule(s): {labels}")
+        message = f"Destination already contains matching LLD rule(s): {labels}"
+        raise TemplateFormatError(message)
 
     infos_by_identity = {
         (info.uuid, info.key): info for info in list_discovery_rules(source)
     }
     moved_infos = tuple(
-        infos_by_identity.get(_rule_identity(rule), _fallback_info(rule)) for rule in selected
+        infos_by_identity.get(_rule_identity(rule), _fallback_info(rule))
+        for rule in selected
     )
 
     if not dry_run:
         if backup:
             copy2(source.path, source.path.with_suffix(source.path.suffix + ".bak"))
-            copy2(destination.path, destination.path.with_suffix(destination.path.suffix + ".bak"))
+            copy2(
+                destination.path,
+                destination.path.with_suffix(destination.path.suffix + ".bak"),
+            )
 
         if retained:
             source.template["discovery_rules"] = retained
