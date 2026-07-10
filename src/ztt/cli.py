@@ -6,7 +6,6 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.table import Table
-
 from ztt import __version__
 from ztt.dependencies import analyze_lld_dependencies
 from ztt.lld import list_discovery_rules, move_discovery_rules
