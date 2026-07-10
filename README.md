@@ -12,33 +12,21 @@ BASE (collection) -> SYSTEM (system LLD and triggers) -> BUSINESS (business serv
 
 - Load and validate a Zabbix YAML export.
 - Display template metadata and object counts.
-- List LLD rules with nested item, trigger and graph prototype counts.
-- Analyze LLD dependencies on macros, value maps and master items.
-- Move selected LLD rules between templates.
-- Preserve the complete LLD block, including preprocessing, filters, prototypes and overrides.
-- Simulate changes before writing.
-- Create `.bak` backups before modifying source files.
+- List and analyze LLD rules.
+- Automatically create linked BASE and SYSTEM templates from an existing export.
+- Move selected LLD rules between existing templates.
+- Preserve complete LLD blocks, including preprocessing, filters, prototypes and overrides.
 - Preserve YAML ordering and quotes through `ruamel.yaml`.
 
 ## Requirements
 
 - Python 3.11 or newer.
-- Git, when installing directly from the repository.
-- Zabbix templates exported in YAML format.
-
-Check the installed Python version:
-
-```bash
-python --version
-```
-
-On some Linux systems, use `python3` instead of `python`.
+- Git when installing from the repository.
+- A Zabbix template exported in YAML format.
 
 ## Installation
 
 ### Linux
-
-Clone the repository and create an isolated Python environment:
 
 ```bash
 git clone https://github.com/oxame/zabbix-template-tool.git
@@ -47,13 +35,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install .
-```
-
-Verify the installation:
-
-```bash
-ztt --version
-ztt --help
 ```
 
 ### Windows PowerShell
@@ -69,120 +50,104 @@ pip install .
 
 Verify the installation:
 
-```powershell
+```bash
 ztt --version
 ztt --help
 ```
 
-If PowerShell blocks activation of the virtual environment, allow locally created scripts for the current user:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-
-### Installation for development
-
-Install the project in editable mode with the test and lint dependencies:
+For development:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-After modifying the source code, the `ztt` command immediately uses the updated files.
+## Create BASE and SYSTEM automatically
 
-### Updating an existing installation
-
-```bash
-cd zabbix-template-tool
-git pull
-source .venv/bin/activate
-pip install --upgrade .
-```
-
-On Windows PowerShell:
-
-```powershell
-Set-Location zabbix-template-tool
-git pull
-.\.venv\Scripts\Activate.ps1
-pip install --upgrade .
-```
-
-## Usage
-
-Display the general help:
+Starting from an existing Zabbix YAML export:
 
 ```bash
-ztt --help
+ztt create-layers template-existing.yaml
 ```
 
-Display help for a command:
+The source file is not modified. By default, ZTT creates a `layers` directory containing two files:
 
-```bash
-ztt move-lld --help
+```text
+layers/
+├── TEMPLATE_NAME_BASE.yaml
+└── TEMPLATE_NAME_SYSTEM.yaml
 ```
 
-### Inspect a template
+The generated BASE template keeps the collection items, macros and shared objects. Its LLD rules are removed.
+
+The generated SYSTEM template receives the complete LLD blocks and is automatically linked to the BASE template.
+
+Choose another output directory:
 
 ```bash
-ztt info path/to/template.yaml
+ztt create-layers template-existing.yaml --output-dir generated
 ```
 
-This command displays the Zabbix export version, the technical and visible template names, and the number of items, LLD rules, triggers, graphs, dashboards and macros.
-
-### List the LLD rules
+Choose the technical-name prefix:
 
 ```bash
-ztt list-lld BASE.yaml
+ztt create-layers template-existing.yaml \
+  --output-dir generated \
+  --prefix TEMPLATE_LINUX
 ```
 
-The table displays each rule name and key together with the number of embedded item prototypes, trigger prototypes, graph prototypes and overrides.
+This produces:
 
-### Analyze LLD dependencies
-
-```bash
-ztt analyze BASE.yaml
+```text
+generated/TEMPLATE_LINUX_BASE.yaml
+generated/TEMPLATE_LINUX_SYSTEM.yaml
 ```
 
-The analysis currently detects:
-
-- user macros such as `{$FS.WARN}`;
-- value maps used by item prototypes;
-- master items referenced by dependent item prototypes.
-
-Each dependency is reported as:
-
-- `OK` when it exists in the template;
-- `MISSING` when the referenced object cannot be found.
-
-Run this command before moving LLD rules so that external dependencies can be identified.
-
-### Simulate an LLD move
-
-A selector can be the exact LLD name, key or UUID:
+ZTT refuses to overwrite existing files by default. To replace previously generated files:
 
 ```bash
-ztt move-lld BASE.yaml SYSTEM.yaml --select "Filesystem discovery"
+ztt create-layers template-existing.yaml \
+  --output-dir generated \
+  --prefix TEMPLATE_LINUX \
+  --overwrite
+```
+
+Before importing, inspect the generated templates:
+
+```bash
+ztt info generated/TEMPLATE_LINUX_BASE.yaml
+ztt info generated/TEMPLATE_LINUX_SYSTEM.yaml
+ztt analyze generated/TEMPLATE_LINUX_SYSTEM.yaml
+```
+
+Import BASE first, then SYSTEM. SYSTEM already contains the link to BASE.
+
+## Other commands
+
+Inspect a template:
+
+```bash
+ztt info template.yaml
+```
+
+List LLD rules:
+
+```bash
+ztt list-lld template.yaml
+```
+
+Analyze macros, value maps and master-item references used by LLD rules:
+
+```bash
+ztt analyze template.yaml
+```
+
+Simulate moving a selected LLD between two existing templates:
+
+```bash
 ztt move-lld BASE.yaml SYSTEM.yaml --select vfs.fs.discovery
 ```
 
-Several selectors can be supplied:
-
-```bash
-ztt move-lld BASE.yaml SYSTEM.yaml \
-  --select vfs.fs.discovery \
-  --select net.if.discovery
-```
-
-Move every discovery rule:
-
-```bash
-ztt move-lld BASE.yaml SYSTEM.yaml --all
-```
-
-Without `--apply`, `move-lld` only simulates the operation. No file is changed.
-
-### Apply an LLD move
+Apply the move:
 
 ```bash
 ztt move-lld BASE.yaml SYSTEM.yaml \
@@ -190,46 +155,37 @@ ztt move-lld BASE.yaml SYSTEM.yaml \
   --apply
 ```
 
-By default, the following backups are created before writing:
-
-```text
-BASE.yaml.bak
-SYSTEM.yaml.bak
-```
-
-Disable backups only when another backup mechanism is already in place:
+Move all LLD rules:
 
 ```bash
-ztt move-lld BASE.yaml SYSTEM.yaml --all --apply --no-backup
+ztt move-lld BASE.yaml SYSTEM.yaml --all --apply
 ```
 
-The destination is rejected if it already contains an LLD rule with the same UUID or key.
+By default, `move-lld` creates `.bak` copies before modifying files.
 
 ## Recommended workflow
 
-For the layered architecture, the recommended sequence is:
-
 ```bash
-ztt info BASE.yaml
-ztt list-lld BASE.yaml
-ztt analyze BASE.yaml
-ztt move-lld BASE.yaml SYSTEM.yaml --select vfs.fs.discovery
-ztt move-lld BASE.yaml SYSTEM.yaml --select vfs.fs.discovery --apply
-ztt info BASE.yaml
-ztt info SYSTEM.yaml
+ztt info template-existing.yaml
+ztt list-lld template-existing.yaml
+ztt analyze template-existing.yaml
+ztt create-layers template-existing.yaml \
+  --output-dir generated \
+  --prefix TEMPLATE_LINUX
+ztt info generated/TEMPLATE_LINUX_BASE.yaml
+ztt info generated/TEMPLATE_LINUX_SYSTEM.yaml
+ztt analyze generated/TEMPLATE_LINUX_SYSTEM.yaml
 ```
 
-Keep the original Zabbix exports in Git before applying changes. This makes it possible to review the YAML diff and revert a modification when necessary.
+Keep the original export in Git and test the generated files in a qualification environment before importing them into production.
 
-## Important limitations
+## Current limitations
 
-The LLD block itself is moved completely, including nested prototypes and overrides. External dependencies are currently analyzed but are not yet copied automatically. In particular, verify macros, value maps and master items before importing the resulting templates into Zabbix.
+The first `create-layers` implementation creates BASE and SYSTEM only. The BUSINESS layer will be added later.
 
-Always test generated templates in a qualification environment before importing them into production.
+External dependencies used by LLD rules are detected by `ztt analyze`, but automatic dependency transfer is still under development. Verify macros, value maps and master items before importing the generated templates.
 
-## Tests and linting
-
-Activate the development virtual environment, then run:
+## Tests
 
 ```bash
 pytest
@@ -239,9 +195,9 @@ ruff check .
 ## Roadmap
 
 - `v0.1`: inspection, structural validation and atomic LLD moves.
-- `v0.2`: dependency analysis for external macros, value maps and master items.
+- `v0.2`: dependency analysis and automatic BASE/SYSTEM creation.
 - `v0.3`: automatic dependency transfer and standalone object moves.
-- `v0.4`: split and merge layered templates.
+- `v0.4`: complete BASE/SYSTEM/BUSINESS split and merge.
 - `v1.0`: graphical interface.
 
 ## License

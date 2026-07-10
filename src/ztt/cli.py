@@ -9,6 +9,7 @@ from rich.table import Table
 
 from ztt import __version__
 from ztt.dependencies import analyze_lld_dependencies
+from ztt.layers import create_base_system_layers
 from ztt.lld import list_discovery_rules, move_discovery_rules
 from ztt.loader import load_template
 from ztt.template import TemplateFormatError
@@ -100,13 +101,8 @@ def list_lld(
 
     title = template.template.get("name", template.path.name)
     table = Table(title=f"LLD rules — {title}")
-    table.add_column("#", justify="right")
-    table.add_column("Name")
-    table.add_column("Key")
-    table.add_column("Items", justify="right")
-    table.add_column("Triggers", justify="right")
-    table.add_column("Graphs", justify="right")
-    table.add_column("Overrides", justify="right")
+    for column in ("#", "Name", "Key", "Items", "Triggers", "Graphs", "Overrides"):
+        table.add_column(column)
     for rule in rules:
         table.add_row(
             str(rule.index),
@@ -136,23 +132,16 @@ def analyze(
 ) -> None:
     """Analyze external dependencies referenced by discovery rules."""
     try:
-        template = load_template(template_file)
-        reports = analyze_lld_dependencies(template)
+        reports = analyze_lld_dependencies(load_template(template_file))
     except (FileNotFoundError, PermissionError, TemplateFormatError) as exc:
         _exit_with_error(exc)
 
     for report in reports:
         table = Table(title=f"{report.rule_name} — {report.rule_key}")
-        table.add_column("Status")
-        table.add_column("Type")
-        table.add_column("Reference")
-        table.add_column("Location")
+        for column in ("Status", "Type", "Reference", "Location"):
+            table.add_column(column)
         for dependency in report.dependencies:
-            status = (
-                "[green]OK[/green]"
-                if dependency.present
-                else "[red]MISSING[/red]"
-            )
+            status = "[green]OK[/green]" if dependency.present else "[red]MISSING[/red]"
             table.add_row(
                 status,
                 dependency.kind,
@@ -162,38 +151,65 @@ def analyze(
         console.print(table)
         if not report.dependencies:
             console.print("[dim]No external dependency detected.[/dim]")
-
     if not reports:
         console.print("[yellow]No discovery rule found.[/yellow]")
 
 
-@app.command("move-lld")
-def move_lld(
+@app.command("create-layers")
+def create_layers(
     source_file: Annotated[
         Path,
         typer.Argument(
             exists=False,
             dir_okay=False,
             readable=True,
-            help="Source YAML export.",
+            help="Existing Zabbix YAML template export.",
         ),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", "-o", help="Directory for generated files."),
+    ] = Path("layers"),
+    prefix: Annotated[
+        str | None,
+        typer.Option("--prefix", help="Technical-name prefix for generated templates."),
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option("--overwrite", help="Replace existing generated files."),
+    ] = False,
+) -> None:
+    """Create linked BASE and SYSTEM templates from an existing export."""
+    try:
+        result = create_base_system_layers(
+            load_template(source_file),
+            output_dir,
+            prefix=prefix,
+            overwrite=overwrite,
+        )
+    except (FileNotFoundError, FileExistsError, PermissionError, TemplateFormatError) as exc:
+        _exit_with_error(exc)
+
+    console.print("[bold green]Layered templates created.[/bold green]")
+    console.print(f"BASE   : {result.base_file} ({result.base_template})")
+    console.print(f"SYSTEM : {result.system_file} ({result.system_template})")
+    console.print(f"LLD rules transferred to SYSTEM: {result.discovery_rules}")
+    console.print("The source YAML file was not modified.")
+
+
+@app.command("move-lld")
+def move_lld(
+    source_file: Annotated[
+        Path,
+        typer.Argument(exists=False, dir_okay=False, readable=True),
     ],
     destination_file: Annotated[
         Path,
-        typer.Argument(
-            exists=False,
-            dir_okay=False,
-            readable=True,
-            help="Destination YAML export.",
-        ),
+        typer.Argument(exists=False, dir_okay=False, readable=True),
     ],
     select: Annotated[
         list[str] | None,
-        typer.Option(
-            "--select",
-            "-s",
-            help="Exact LLD name, key, or UUID. Repeat to move several rules.",
-        ),
+        typer.Option("--select", "-s", help="Exact LLD name, key, or UUID."),
     ] = None,
     move_all: Annotated[
         bool,
@@ -201,26 +217,18 @@ def move_lld(
     ] = False,
     apply: Annotated[
         bool,
-        typer.Option(
-            "--apply",
-            help="Write the changes. Without this flag, only simulate.",
-        ),
+        typer.Option("--apply", help="Write changes; otherwise only simulate."),
     ] = False,
     backup: Annotated[
         bool,
-        typer.Option(
-            "--backup/--no-backup",
-            help="Create .bak copies before writing.",
-        ),
+        typer.Option("--backup/--no-backup", help="Create .bak copies before writing."),
     ] = True,
 ) -> None:
     """Move complete LLD rule blocks from one template export to another."""
     try:
-        source = load_template(source_file)
-        destination = load_template(destination_file)
         result = move_discovery_rules(
-            source,
-            destination,
+            load_template(source_file),
+            load_template(destination_file),
             selectors=select,
             move_all=move_all,
             dry_run=not apply,
@@ -236,9 +244,7 @@ def move_lld(
     console.print(f"Source rules remaining: {result.source_remaining}")
     console.print(f"Destination rules after move: {result.destination_total}")
     if result.dry_run:
-        console.print(
-            "[yellow]No file changed. Add --apply to perform the move.[/yellow]"
-        )
+        console.print("[yellow]No file changed. Add --apply to perform the move.[/yellow]")
 
 
 def _exit_with_error(exc: Exception) -> None:
