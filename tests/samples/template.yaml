@@ -1,0 +1,22 @@
+zabbix_export:
+  version: '7.4'
+  template_groups:
+    - uuid: 11111111111111111111111111111111
+      name: Templates/Custom
+  templates:
+    - uuid: 22222222222222222222222222222222
+      template: TEMPLATE_TEST_BASE
+      name: Test Base
+      groups:
+        - name: Templates/Custom
+      items:
+        - uuid: 33333333333333333333333333333333
+          name: Agent ping
+          key: agent.ping
+      discovery_rules:
+        - uuid: 44444444444444444444444444444444
+          name: Filesystem discovery
+          key: vfs.fs.discovery
+      macros:
+        - macro: '{$TEST}'
+          value: '1'
