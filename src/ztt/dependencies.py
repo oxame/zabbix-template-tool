@@ -31,7 +31,11 @@ class RuleDependencyReport:
 
     @property
     def missing(self) -> tuple[Dependency, ...]:
-        return tuple(dependency for dependency in self.dependencies if not dependency.present)
+        return tuple(
+            dependency
+            for dependency in self.dependencies
+            if not dependency.present
+        )
 
 
 def _walk(value: Any, location: str = "rule") -> list[tuple[str, Any]]:
@@ -82,7 +86,9 @@ def _template_item_keys(template: ZabbixTemplate) -> set[str]:
     }
 
 
-def analyze_lld_dependencies(template: ZabbixTemplate) -> list[RuleDependencyReport]:
+def analyze_lld_dependencies(
+    template: ZabbixTemplate,
+) -> list[RuleDependencyReport]:
     """Analyze macros, value maps and master items referenced by LLD rules."""
     macros = _template_macros(template)
     value_maps = _template_value_maps(template)
