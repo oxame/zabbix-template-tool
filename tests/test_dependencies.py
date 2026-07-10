@@ -55,7 +55,10 @@ def test_analyze_lld_dependencies(tmp_path: Path) -> None:
     reports = analyze_lld_dependencies(load_template(path))
 
     assert len(reports) == 1
-    dependencies = {(item.kind, item.reference): item.present for item in reports[0].dependencies}
+    dependencies = {
+        (item.kind, item.reference): item.present
+        for item in reports[0].dependencies
+    }
     assert dependencies[("macro", "{$FS.WARN}")] is True
     assert dependencies[("macro", "{$FS.CRIT}")] is False
     assert dependencies[("value_map", "Filesystem status")] is True
