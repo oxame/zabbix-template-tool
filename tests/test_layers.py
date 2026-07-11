@@ -52,6 +52,7 @@ def test_create_three_linked_layers(tmp_path: Path) -> None:
     assert business.template["template"] == "TEMPLATE_TEST_BUSINESS"
     assert "items" not in business.template
     assert "discovery_rules" not in business.template
+    assert "dashboards" not in business.template
     assert business.template["templates"] == [{"name": "TEMPLATE_TEST_SYSTEM"}]
 
     source_uuids = _collect_uuids(source.document)
@@ -66,7 +67,7 @@ def test_create_three_linked_layers(tmp_path: Path) -> None:
     assert system_uuids.isdisjoint(business_uuids)
 
 
-def test_rewrite_references_and_copy_required_valuemaps(tmp_path: Path) -> None:
+def test_rewrite_references_copy_valuemaps_and_skip_dashboards(tmp_path: Path) -> None:
     source_file = tmp_path / "source.yaml"
     source_file.write_text(
         """zabbix_export:
@@ -117,13 +118,6 @@ def test_rewrite_references_and_copy_required_valuemaps(tmp_path: Path) -> None:
                       value:
                         host: ORIGINAL
                         name: Prototype graph
-                - type: graph
-                  fields:
-                    - type: ITEM
-                      name: itemid.0
-                      value:
-                        host: ORIGINAL
-                        key: base.key
   triggers:
     - uuid: 77777777777777777777777777777777
       name: Base trigger
@@ -148,6 +142,7 @@ def test_rewrite_references_and_copy_required_valuemaps(tmp_path: Path) -> None:
     system = load_template(result.system_file)
     business = load_template(result.business_file)
 
+    assert result.dashboards == 1
     assert "dashboards" not in base.template
     assert "triggers" in base.document["zabbix_export"]
     assert "graphs" in base.document["zabbix_export"]
@@ -168,11 +163,7 @@ def test_rewrite_references_and_copy_required_valuemaps(tmp_path: Path) -> None:
     ][0]["expression"]
 
     assert business.template["templates"] == [{"name": "LAYERED_SYSTEM"}]
-    widgets = business.template["dashboards"][0]["pages"][0]["widgets"]
-    prototype_host = widgets[0]["fields"][0]["value"]["host"]
-    item_host = widgets[1]["fields"][0]["value"]["host"]
-    assert prototype_host == "LAYERED_SYSTEM"
-    assert item_host == "LAYERED_BASE"
+    assert "dashboards" not in business.template
 
 
 def test_refuse_existing_outputs(tmp_path: Path) -> None:
