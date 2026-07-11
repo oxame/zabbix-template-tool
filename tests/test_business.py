@@ -52,6 +52,19 @@ def test_create_additional_business_with_filesystem_and_service_lld(tmp_path: Pa
             - uuid: 55555555555555555555555555555555
               name: Service state
               key: service.info[{#SERVICE.NAME},state]
+              valuemap:
+                name: Windows service state
+      valuemaps:
+        - uuid: 77777777777777777777777777777777
+          name: Windows service state
+          mappings:
+            - value: '0'
+              newvalue: Running
+        - uuid: 88888888888888888888888888888888
+          name: Unused map
+          mappings:
+            - value: '1'
+              newvalue: Unused
 """,
         encoding="utf-8",
     )
@@ -88,6 +101,9 @@ def test_create_additional_business_with_filesystem_and_service_lld(tmp_path: Pa
     assert service_rule["item_prototypes"][0]["key"] == (
         "ztt.business.bdd.service.info[{#SERVICE.NAME},state]"
     )
+    assert service_rule["item_prototypes"][0]["valuemap"] == {
+        "name": "Windows service state"
+    }
     assert service_rule["master_item"]["key"] == "service.discovery"
 
     inherited_keys = {
@@ -102,6 +118,13 @@ def test_create_additional_business_with_filesystem_and_service_lld(tmp_path: Pa
     }
     assert inherited_keys.isdisjoint(generated_keys)
 
+    assert business.template["valuemaps"] == [
+        {
+            "uuid": business.template["valuemaps"][0]["uuid"],
+            "name": "Windows service state",
+            "mappings": [{"value": "0", "newvalue": "Running"}],
+        }
+    ]
     assert business.template["tags"] == [
         {"tag": "layer", "value": "business"},
         {"tag": "application", "value": "bdd"},
