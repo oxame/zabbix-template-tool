@@ -88,6 +88,36 @@ def _rewrite_dashboard_references(
                         reference["host"] = base_template
 
 
+def _collect_valuemap_names(value: Any) -> set[str]:
+    """Collect value-map names referenced anywhere in a discovery-rule subtree."""
+    names: set[str] = set()
+    if isinstance(value, dict):
+        valuemap = value.get("valuemap")
+        if isinstance(valuemap, dict):
+            name = valuemap.get("name")
+            if isinstance(name, str) and name:
+                names.add(name)
+        for child in value.values():
+            names.update(_collect_valuemap_names(child))
+    elif isinstance(value, list):
+        for child in value:
+            names.update(_collect_valuemap_names(child))
+    return names
+
+
+def _select_valuemaps(valuemaps: Any, names: set[str]) -> list[Any]:
+    """Return only the value maps required by objects moved to SYSTEM."""
+    if not names:
+        return []
+    if not isinstance(valuemaps, list):
+        raise TemplateFormatError("'valuemaps' must be a list when present.")
+    return [
+        deepcopy(valuemap)
+        for valuemap in valuemaps
+        if isinstance(valuemap, dict) and valuemap.get("name") in names
+    ]
+
+
 def create_base_system_layers(
     source: ZabbixTemplate,
     output_dir: Path,
@@ -98,9 +128,9 @@ def create_base_system_layers(
     """Create coherent BASE and SYSTEM exports without modifying the source.
 
     BASE owns collection items, macros, value maps, standalone triggers and
-    graphs. SYSTEM owns LLD rules and dashboards and inherits BASE. References
-    are rewritten to the technical names of the generated layers and every UUID
-    is renewed so both files can be imported alongside the source template.
+    graphs. SYSTEM owns LLD rules, the value maps they require, and dashboards,
+    and inherits BASE. References are rewritten to the technical names of the
+    generated layers and every UUID is renewed.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -134,6 +164,12 @@ def create_base_system_layers(
     if not isinstance(dashboards, list):
         raise TemplateFormatError("'dashboards' must be a list when present.")
 
+    required_valuemap_names = _collect_valuemap_names(discovery_rules)
+    required_valuemaps = _select_valuemaps(
+        system_template.get("valuemaps", []),
+        required_valuemap_names,
+    )
+
     base_template["template"] = base_technical
     base_template["name"] = base_visible
 
@@ -143,8 +179,12 @@ def create_base_system_layers(
     system_template["templates"] = [{"name": base_technical}]
     if dashboards:
         system_template["dashboards"] = dashboards
+    if required_valuemaps:
+        system_template["valuemaps"] = required_valuemaps
+    else:
+        system_template.pop("valuemaps", None)
 
-    for key in ("items", "triggers", "graphs", "macros", "valuemaps"):
+    for key in ("items", "triggers", "graphs", "macros"):
         system_template.pop(key, None)
 
     # Export-level triggers and graphs reference standalone BASE items. They must
