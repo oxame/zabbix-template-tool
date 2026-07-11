@@ -43,11 +43,12 @@ def _regenerate_uuids(value: Any) -> None:
 
 
 def _rewrite_strings(value: Any, replacements: dict[str, str]) -> None:
+    ordered = sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True)
     if isinstance(value, dict):
         for key, child in value.items():
             if isinstance(child, str):
                 updated = child
-                for old, new in replacements.items():
+                for old, new in ordered:
                     updated = updated.replace(old, new)
                 value[key] = updated
             else:
@@ -106,6 +107,32 @@ def _set_business_filter(
     }
 
 
+def _namespace_item_prototype_keys(rule: dict[str, Any], namespace: str) -> None:
+    """Give every cloned item prototype a unique BUSINESS key.
+
+    Zabbix identifies inherited item prototypes by key. Keeping a SYSTEM key in a
+    child template makes an import look like an update of the inherited object,
+    where fields such as value_type are read-only.
+    """
+    replacements: dict[str, str] = {}
+    prototypes = rule.get("item_prototypes", [])
+    if not isinstance(prototypes, list):
+        return
+
+    prefix = f"ztt.business.{namespace}."
+    for prototype in prototypes:
+        if not isinstance(prototype, dict):
+            continue
+        old_key = prototype.get("key")
+        if not isinstance(old_key, str) or not old_key:
+            continue
+        new_key = old_key if old_key.startswith(prefix) else f"{prefix}{old_key}"
+        replacements[old_key] = new_key
+
+    if replacements:
+        _rewrite_strings(rule, replacements)
+
+
 def _clone_filesystem_rule(rule: dict[str, Any], namespace: str) -> dict[str, Any]:
     clone = deepcopy(rule)
     old_key = str(clone.get("key", "vfs.fs.discovery"))
@@ -119,14 +146,8 @@ def _clone_filesystem_rule(rule: dict[str, Any], namespace: str) -> dict[str, An
         "{$BUSINESS.FS.MATCHES}",
         "{$BUSINESS.FS.NOT_MATCHES}",
     )
-    _rewrite_strings(
-        clone,
-        {
-            old_key: new_key,
-            "vfs.fs.size[": f"ztt.business.{namespace}.vfs.fs.size[",
-            "vfs.fs.get": "vfs.fs.get",
-        },
-    )
+    _namespace_item_prototype_keys(clone, namespace)
+    _rewrite_strings(clone, {old_key: new_key})
     return clone
 
 
@@ -138,21 +159,18 @@ def _clone_service_rule(rule: dict[str, Any], namespace: str) -> dict[str, Any] 
     new_key = f"ztt.business.{namespace}.service.discovery"
     clone["name"] = f"{clone.get('name', 'Service discovery')} - BUSINESS {namespace}"
     clone["key"] = new_key
-    lld_macro = _find_filter_macro(clone, ("{#SERVICE.NAME}", "{#SERVICE.DISPLAYNAME}")) or "{#SERVICE.NAME}"
+    lld_macro = _find_filter_macro(
+        clone,
+        ("{#SERVICE.NAME}", "{#SERVICE.DISPLAYNAME}"),
+    ) or "{#SERVICE.NAME}"
     _set_business_filter(
         clone,
         lld_macro,
         "{$BUSINESS.SERVICE.MATCHES}",
         "{$BUSINESS.SERVICE.NOT_MATCHES}",
     )
-    _rewrite_strings(
-        clone,
-        {
-            old_key: new_key,
-            "service.info[": f"ztt.business.{namespace}.service.info[",
-            "service.get[": f"ztt.business.{namespace}.service.get[",
-        },
-    )
+    _namespace_item_prototype_keys(clone, namespace)
+    _rewrite_strings(clone, {old_key: new_key})
     return clone
 
 
