@@ -30,8 +30,18 @@ def test_create_additional_business_with_filesystem_and_service_lld(tmp_path: Pa
                 value: '{$VFS.FS.FSNAME.MATCHES}'
           item_prototypes:
             - uuid: 33333333333333333333333333333333
+              name: FS raw data
+              type: DEPENDENT
+              key: vfs.fs.dependent[{#FSNAME},data]
+              value_type: TEXT
+              master_item:
+                key: vfs.fs.get
+            - uuid: 66666666666666666666666666666666
               name: FS used
-              key: vfs.fs.size[{#FSNAME},used]
+              type: DEPENDENT
+              key: vfs.fs.dependent.size[{#FSNAME},used]
+              master_item:
+                key: vfs.fs.dependent[{#FSNAME},data]
         - uuid: 44444444444444444444444444444444
           name: Windows services discovery
           type: DEPENDENT
@@ -68,15 +78,29 @@ def test_create_additional_business_with_filesystem_and_service_lld(tmp_path: Pa
 
     filesystem_rule, service_rule = business.template["discovery_rules"]
     assert filesystem_rule["key"] == "ztt.business.bdd.fs.discovery"
-    assert filesystem_rule["item_prototypes"][0]["key"] == (
-        "ztt.business.bdd.vfs.fs.size[{#FSNAME},used]"
-    )
+    raw, used = filesystem_rule["item_prototypes"]
+    assert raw["key"] == "ztt.business.bdd.vfs.fs.dependent[{#FSNAME},data]"
+    assert used["key"] == "ztt.business.bdd.vfs.fs.dependent.size[{#FSNAME},used]"
+    assert used["master_item"]["key"] == raw["key"]
     assert filesystem_rule["master_item"]["key"] == "vfs.fs.get"
+
     assert service_rule["key"] == "ztt.business.bdd.service.discovery"
     assert service_rule["item_prototypes"][0]["key"] == (
         "ztt.business.bdd.service.info[{#SERVICE.NAME},state]"
     )
     assert service_rule["master_item"]["key"] == "service.discovery"
+
+    inherited_keys = {
+        "vfs.fs.dependent[{#FSNAME},data]",
+        "vfs.fs.dependent.size[{#FSNAME},used]",
+        "service.info[{#SERVICE.NAME},state]",
+    }
+    generated_keys = {
+        prototype["key"]
+        for rule in business.template["discovery_rules"]
+        for prototype in rule.get("item_prototypes", [])
+    }
+    assert inherited_keys.isdisjoint(generated_keys)
 
     assert business.template["tags"] == [
         {"tag": "layer", "value": "business"},
