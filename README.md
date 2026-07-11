@@ -80,9 +80,11 @@ Example:
 └── TEMPLATE_NAME_SYSTEM.yaml
 ```
 
-The generated BASE template keeps the collection items, macros and shared objects. Its LLD rules are removed.
+The generated BASE template keeps collection items, macros, standalone triggers, graphs, shared objects and dashboard widgets that reference those objects. Its LLD rules are removed.
 
-The generated SYSTEM template receives the complete LLD blocks and is automatically linked to the BASE template.
+The generated SYSTEM template receives complete LLD blocks, the Value Maps required by their prototypes and dashboard widgets that reference graph prototypes. It is automatically linked to BASE.
+
+When a dashboard mixes BASE widgets (`ITEM` or `GRAPH`) and SYSTEM widgets (`GRAPH_PROTOTYPE`), ZTT creates a filtered copy in each layer so that every imported dashboard only references objects available in its own template.
 
 Choose another output directory with `--output-dir` or `-o`:
 
@@ -201,7 +203,7 @@ Keep the original export in Git and test the generated files in a qualification 
 
 The first `create-layers` implementation creates BASE and SYSTEM only. The BUSINESS layer will be added later.
 
-External dependencies used by LLD rules are detected by `ztt analyze`, but automatic dependency transfer is still under development. Verify macros, value maps and master items before importing the generated templates.
+External dependencies used by LLD rules are detected by `ztt analyze`. Automatic transfer currently covers required Value Maps; master-item and other dependency transfer is still under development.
 
 ## Tests
 
@@ -212,11 +214,9 @@ ruff check .
 
 ## Roadmap
 
-The detailed project roadmap covers dependency management, full BASE/SYSTEM/BUSINESS generation, project mode, Git integration, Zabbix API exports, intelligent diff, documentation, CI/CD and the future graphical interface.
+See the complete project roadmap in [ROADMAP.md](ROADMAP.md).
 
-See [ROADMAP.md](ROADMAP.md).
-
-The Zabbix API export feature is also tracked in [issue #6](https://github.com/oxame/zabbix-template-tool/issues/6).
+The API-import feature is tracked in [issue #6](https://github.com/oxame/zabbix-template-tool/issues/6).
 
 ## License
 
