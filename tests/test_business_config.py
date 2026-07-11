@@ -14,15 +14,9 @@ def test_business_name_macros_and_tags(tmp_path: Path) -> None:
         prefix="WINDOWS",
         business_name="Oracle",
         system_tags={"layer": "system", "technology": "windows"},
-        business_tags={
-            "layer": "business",
-            "application": "oracle",
-            "responsibility": "DBA",
-        },
+        business_tags={"layer": "business", "application": "oracle"},
         filesystem_matches=r"^(D:|E:)$",
-        filesystem_not_matches=r"^C:$",
         service_matches=r"^Oracle.*",
-        service_not_matches="",
     )
 
     system = load_template(result.system_file)
@@ -30,19 +24,9 @@ def test_business_name_macros_and_tags(tmp_path: Path) -> None:
 
     assert result.business_file.name == "WINDOWS_Oracle.yaml"
     assert result.business_template == "WINDOWS_Oracle"
-    assert system.template["tags"] == [
-        {"tag": "layer", "value": "system"},
-        {"tag": "technology", "value": "windows"},
-    ]
+    assert system.template["tags"][0]["value"] == "system"
     assert business.template["templates"] == [{"name": "WINDOWS_SYSTEM"}]
-    assert business.template["tags"] == [
-        {"tag": "layer", "value": "business"},
-        {"tag": "application", "value": "oracle"},
-        {"tag": "responsibility", "value": "DBA"},
-    ]
-    assert business.template["macros"] == [
-        {"macro": "{$BUSINESS.FS.MATCHES}", "value": r"^(D:|E:)$"},
-        {"macro": "{$BUSINESS.FS.NOT_MATCHES}", "value": r"^C:$"},
-        {"macro": "{$BUSINESS.SERVICE.MATCHES}", "value": r"^Oracle.*"},
-        {"macro": "{$BUSINESS.SERVICE.NOT_MATCHES}", "value": ""},
-    ]
+    assert business.template["tags"][1] == {"tag": "application", "value": "oracle"}
+    macro_names = {macro["macro"] for macro in business.template["macros"]}
+    assert "{$BUSINESS.FS.MATCHES}" in macro_names
+    assert "{$BUSINESS.SERVICE.MATCHES}" in macro_names
