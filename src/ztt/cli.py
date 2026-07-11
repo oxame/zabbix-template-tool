@@ -167,9 +167,13 @@ def create_layers(
         ),
     ],
     output_dir: Annotated[
-        Path,
-        typer.Option("--output-dir", "-o", help="Directory for generated files."),
-    ] = Path("layers"),
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            "-o",
+            help="Directory for generated files. Defaults to the source file directory.",
+        ),
+    ] = None,
     prefix: Annotated[
         str | None,
         typer.Option("--prefix", help="Technical-name prefix for generated templates."),
@@ -181,9 +185,11 @@ def create_layers(
 ) -> None:
     """Create linked BASE and SYSTEM templates from an existing export."""
     try:
+        source = load_template(source_file)
+        destination = output_dir if output_dir is not None else source.path.parent
         result = create_base_system_layers(
-            load_template(source_file),
-            output_dir,
+            source,
+            destination,
             prefix=prefix,
             overwrite=overwrite,
         )
