@@ -5,7 +5,7 @@
 The project is designed around layered templates:
 
 ```text
-BASE (collection) -> SYSTEM (system LLD and triggers) -> BUSINESS (business services and triggers)
+BASE (collection) -> SYSTEM (system LLD and triggers) -> BUSINESS (dashboards and business objects)
 ```
 
 ## Current capabilities
@@ -13,7 +13,7 @@ BASE (collection) -> SYSTEM (system LLD and triggers) -> BUSINESS (business serv
 - Load and validate a Zabbix YAML export.
 - Display template metadata and object counts.
 - List and analyze LLD rules.
-- Automatically create linked BASE and SYSTEM templates from an existing export.
+- Automatically create linked BASE, SYSTEM and BUSINESS templates.
 - Move selected LLD rules between existing templates.
 - Preserve complete LLD blocks, including preprocessing, filters, prototypes and overrides.
 - Preserve YAML ordering and quotes through `ruamel.yaml`.
@@ -61,7 +61,7 @@ For development:
 pip install -e ".[dev]"
 ```
 
-## Create BASE and SYSTEM automatically
+## Create BASE, SYSTEM and BUSINESS automatically
 
 Starting from an existing Zabbix YAML export:
 
@@ -69,32 +69,47 @@ Starting from an existing Zabbix YAML export:
 ztt create-layers template-existing.yaml
 ```
 
-The source file is not modified. By default, ZTT creates the two generated templates in the same directory as the source file.
-
-Example:
+The source file is not modified. By default, ZTT creates the three generated templates in the same directory as the source file.
 
 ```text
 /templates/
 ├── template-existing.yaml
 ├── TEMPLATE_NAME_BASE.yaml
-└── TEMPLATE_NAME_SYSTEM.yaml
+├── TEMPLATE_NAME_SYSTEM.yaml
+└── TEMPLATE_NAME_BUSINESS.yaml
 ```
 
-The generated BASE template keeps the collection items, macros and shared objects. Its LLD rules are removed.
+The generated layers contain:
 
-The generated SYSTEM template receives the complete LLD blocks and is automatically linked to the BASE template.
+```text
+BASE
+├── collection items
+├── macros
+├── value maps
+├── standalone triggers
+└── standalone graphs
+
+SYSTEM -> BASE
+├── LLD rules
+├── item prototypes
+├── trigger prototypes
+├── graph prototypes
+├── overrides
+└── value maps required by prototypes
+
+BUSINESS -> SYSTEM
+└── dashboards
+```
+
+Dashboard widget references are rewritten to point to the layer that owns the referenced object:
+
+- item and graph widgets point to BASE;
+- graph prototype widgets point to SYSTEM.
 
 Choose another output directory with `--output-dir` or `-o`:
 
 ```bash
 ztt create-layers template-existing.yaml --output-dir generated
-```
-
-The output path can be relative or absolute:
-
-```bash
-ztt create-layers /data/templates/template-existing.yaml \
-  --output-dir /data/templates/generated
 ```
 
 Choose the technical-name prefix:
@@ -110,13 +125,13 @@ This produces:
 ```text
 generated/TEMPLATE_LINUX_BASE.yaml
 generated/TEMPLATE_LINUX_SYSTEM.yaml
+generated/TEMPLATE_LINUX_BUSINESS.yaml
 ```
 
 ZTT refuses to overwrite existing files by default. To replace previously generated files:
 
 ```bash
 ztt create-layers template-existing.yaml \
-  --output-dir generated \
   --prefix TEMPLATE_LINUX \
   --overwrite
 ```
@@ -124,12 +139,21 @@ ztt create-layers template-existing.yaml \
 Before importing, inspect the generated templates:
 
 ```bash
-ztt info TEMPLATE_NAME_BASE.yaml
-ztt info TEMPLATE_NAME_SYSTEM.yaml
-ztt analyze TEMPLATE_NAME_SYSTEM.yaml
+ztt info TEMPLATE_LINUX_BASE.yaml
+ztt info TEMPLATE_LINUX_SYSTEM.yaml
+ztt analyze TEMPLATE_LINUX_SYSTEM.yaml
+ztt info TEMPLATE_LINUX_BUSINESS.yaml
 ```
 
-Import BASE first, then SYSTEM. SYSTEM already contains the link to BASE.
+Import the templates in this order:
+
+```text
+1. BASE
+2. SYSTEM
+3. BUSINESS
+```
+
+SYSTEM already contains the link to BASE. BUSINESS already contains the link to SYSTEM.
 
 ## Other commands
 
@@ -175,33 +199,23 @@ By default, `move-lld` creates `.bak` copies before modifying files.
 
 ## Recommended workflow
 
-Generate files beside the source template:
-
 ```bash
 ztt info template-existing.yaml
 ztt list-lld template-existing.yaml
 ztt analyze template-existing.yaml
 ztt create-layers template-existing.yaml --prefix TEMPLATE_LINUX
 ztt info TEMPLATE_LINUX_BASE.yaml
-ztt info TEMPLATE_LINUX_SYSTEM.yaml
 ztt analyze TEMPLATE_LINUX_SYSTEM.yaml
-```
-
-Or generate them in a dedicated directory:
-
-```bash
-ztt create-layers template-existing.yaml \
-  --output-dir generated \
-  --prefix TEMPLATE_LINUX
+ztt info TEMPLATE_LINUX_BUSINESS.yaml
 ```
 
 Keep the original export in Git and test the generated files in a qualification environment before importing them into production.
 
 ## Current limitations
 
-The first `create-layers` implementation creates BASE and SYSTEM only. The BUSINESS layer will be added later.
+External dependencies used by LLD rules are detected by `ztt analyze`. Value maps used by prototypes are copied automatically to SYSTEM, while broader automatic dependency transfer remains under development.
 
-External dependencies used by LLD rules are detected by `ztt analyze`, but automatic dependency transfer is still under development. Verify macros, value maps and master items before importing the generated templates.
+The BUSINESS layer currently contains exported template dashboards. Classification of business triggers, services and SLA objects will be added progressively.
 
 ## Tests
 

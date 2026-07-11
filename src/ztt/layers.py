@@ -18,9 +18,12 @@ class LayerCreationResult:
 
     base_file: Path
     system_file: Path
+    business_file: Path
     base_template: str
     system_template: str
+    business_template: str
     discovery_rules: int
+    dashboards: int
 
 
 def _slug(value: str) -> str:
@@ -118,19 +121,24 @@ def _select_valuemaps(valuemaps: Any, names: set[str]) -> list[Any]:
     ]
 
 
-def create_base_system_layers(
+def _remove_template_objects(template: dict[str, Any], keys: tuple[str, ...]) -> None:
+    for key in keys:
+        template.pop(key, None)
+
+
+def create_layered_templates(
     source: ZabbixTemplate,
     output_dir: Path,
     *,
     prefix: str | None = None,
     overwrite: bool = False,
 ) -> LayerCreationResult:
-    """Create coherent BASE and SYSTEM exports without modifying the source.
+    """Create coherent BASE, SYSTEM and BUSINESS exports.
 
     BASE owns collection items, macros, value maps, standalone triggers and
-    graphs. SYSTEM owns LLD rules, the value maps they require, and dashboards,
-    and inherits BASE. References are rewritten to the technical names of the
-    generated layers and every UUID is renewed.
+    graphs. SYSTEM owns LLD rules and the value maps required by prototypes.
+    BUSINESS owns dashboards and links to SYSTEM. Every generated template gets
+    independent UUIDs and the source file is never modified.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -140,21 +148,28 @@ def create_base_system_layers(
 
     base_technical = f"{root_name}_BASE"
     system_technical = f"{root_name}_SYSTEM"
+    business_technical = f"{root_name}_BUSINESS"
     base_visible = f"{original_visible} BASE"
     system_visible = f"{original_visible} SYSTEM"
+    business_visible = f"{original_visible} BUSINESS"
 
     base_file = output_dir / f"{base_technical}.yaml"
     system_file = output_dir / f"{system_technical}.yaml"
-    for path in (base_file, system_file):
+    business_file = output_dir / f"{business_technical}.yaml"
+    for path in (base_file, system_file, business_file):
         if path.exists() and not overwrite:
             raise FileExistsError(f"Output file already exists: {path}")
 
     base_document = deepcopy(source.document)
     system_document = deepcopy(source.document)
+    business_document = deepcopy(source.document)
+
     base_export = base_document["zabbix_export"]
     system_export = system_document["zabbix_export"]
+    business_export = business_document["zabbix_export"]
     base_template = base_export["templates"][0]
     system_template = system_export["templates"][0]
+    business_template = business_export["templates"][0]
 
     discovery_rules = base_template.pop("discovery_rules", [])
     if not isinstance(discovery_rules, list):
@@ -177,23 +192,40 @@ def create_base_system_layers(
     system_template["name"] = system_visible
     system_template["discovery_rules"] = discovery_rules
     system_template["templates"] = [{"name": base_technical}]
-    if dashboards:
-        system_template["dashboards"] = dashboards
     if required_valuemaps:
         system_template["valuemaps"] = required_valuemaps
     else:
         system_template.pop("valuemaps", None)
+    _remove_template_objects(
+        system_template,
+        ("items", "triggers", "graphs", "macros", "dashboards"),
+    )
 
-    for key in ("items", "triggers", "graphs", "macros"):
-        system_template.pop(key, None)
+    business_template["template"] = business_technical
+    business_template["name"] = business_visible
+    business_template["templates"] = [{"name": system_technical}]
+    if dashboards:
+        business_template["dashboards"] = dashboards
+    else:
+        business_template.pop("dashboards", None)
+    _remove_template_objects(
+        business_template,
+        (
+            "items",
+            "discovery_rules",
+            "triggers",
+            "graphs",
+            "macros",
+            "valuemaps",
+        ),
+    )
 
-    # Export-level triggers and graphs reference standalone BASE items. They must
-    # not be duplicated in SYSTEM because SYSTEM inherits them from BASE.
-    system_export.pop("triggers", None)
-    system_export.pop("graphs", None)
+    # Export-level triggers and graphs reference standalone BASE items.
+    for export in (system_export, business_export):
+        export.pop("triggers", None)
+        export.pop("graphs", None)
 
-    # Dashboard references must be classified before the generic SYSTEM rewrite,
-    # otherwise every widget would incorrectly point to SYSTEM.
+    # Classify dashboard references before the generic BUSINESS rewrite.
     _rewrite_dashboard_references(
         dashboards,
         original_technical,
@@ -202,17 +234,43 @@ def create_base_system_layers(
     )
     _rewrite_template_references(base_document, original_technical, base_technical)
     _rewrite_template_references(system_document, original_technical, system_technical)
+    _rewrite_template_references(
+        business_document,
+        original_technical,
+        business_technical,
+    )
 
     _regenerate_uuids(base_document)
     _regenerate_uuids(system_document)
+    _regenerate_uuids(business_document)
 
     write_document(base_file, base_document)
     write_document(system_file, system_document)
+    write_document(business_file, business_document)
 
     return LayerCreationResult(
         base_file=base_file,
         system_file=system_file,
+        business_file=business_file,
         base_template=base_technical,
         system_template=system_technical,
+        business_template=business_technical,
         discovery_rules=len(discovery_rules),
+        dashboards=len(dashboards),
+    )
+
+
+def create_base_system_layers(
+    source: ZabbixTemplate,
+    output_dir: Path,
+    *,
+    prefix: str | None = None,
+    overwrite: bool = False,
+) -> LayerCreationResult:
+    """Backward-compatible alias for the three-layer generator."""
+    return create_layered_templates(
+        source,
+        output_dir,
+        prefix=prefix,
+        overwrite=overwrite,
     )
