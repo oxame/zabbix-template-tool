@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ztt.business import _clone_filesystem_rule, _clone_service_rule
 from ztt.template import TemplateFormatError, ZabbixTemplate
 from ztt.writer import write_document
 
@@ -115,6 +116,59 @@ def _business_macros(
     return [{"macro": macro, "value": value} for macro, value in values if value is not None]
 
 
+def _is_service_rule(rule: dict[str, Any]) -> bool:
+    key = str(rule.get("key", "")).lower()
+    name = str(rule.get("name", "")).lower()
+    return "service.discovery" in key or "service" in name
+
+
+def _service_master_item(rule: dict[str, Any]) -> dict[str, Any]:
+    """Convert a native service discovery rule into a reusable raw item."""
+    allowed = {
+        "name",
+        "type",
+        "key",
+        "delay",
+        "history",
+        "value_type",
+        "description",
+        "preprocessing",
+        "timeout",
+        "tags",
+    }
+    item = {key: deepcopy(value) for key, value in rule.items() if key in allowed}
+    item["uuid"] = _new_uuid()
+    item["name"] = f"{rule.get('name', 'Windows services discovery')} raw data"
+    item["key"] = str(rule.get("key", "service.discovery"))
+    item["value_type"] = "TEXT"
+    item.setdefault("history", "0")
+    return item
+
+
+def _dependent_service_rule(rule: dict[str, Any]) -> dict[str, Any]:
+    clone = deepcopy(rule)
+    raw_key = str(rule.get("key", "service.discovery"))
+    clone["type"] = "DEPENDENT"
+    clone["key"] = "ztt.system.service.discovery"
+    clone["master_item"] = {"key": raw_key}
+    clone.pop("delay", None)
+    return clone
+
+
+def _prepare_shared_services(
+    discovery_rules: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    masters: list[dict[str, Any]] = []
+    prepared: list[dict[str, Any]] = []
+    for rule in discovery_rules:
+        if _is_service_rule(rule) and not isinstance(rule.get("master_item"), dict):
+            masters.append(_service_master_item(rule))
+            prepared.append(_dependent_service_rule(rule))
+        else:
+            prepared.append(rule)
+    return masters, prepared
+
+
 def create_layered_templates(
     source: ZabbixTemplate,
     output_dir: Path,
@@ -129,17 +183,14 @@ def create_layered_templates(
     service_matches: str | None = None,
     service_not_matches: str | None = None,
 ) -> LayerCreationResult:
-    """Create BASE, SYSTEM and a configurable BUSINESS template.
-
-    BUSINESS macros and tags are prepared for future business LLD generation.
-    Dashboards remain deliberately excluded until widget dependencies are safe.
-    """
+    """Create BASE, SYSTEM and a configurable BUSINESS template."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     original_technical = str(source.template.get("template", "TEMPLATE"))
     original_visible = str(source.template.get("name", original_technical))
     root_name = _slug(prefix or original_technical)
     business_suffix = _slug(business_name or "BUSINESS")
+    namespace = business_suffix.lower()
 
     base_technical = f"{root_name}_BASE"
     system_technical = f"{root_name}_SYSTEM"
@@ -168,6 +219,11 @@ def create_layered_templates(
     discovery_rules = base_template.pop("discovery_rules", [])
     if not isinstance(discovery_rules, list):
         raise TemplateFormatError("'discovery_rules' must be a list when present.")
+    discovery_rules = [rule for rule in discovery_rules if isinstance(rule, dict)]
+    service_masters, discovery_rules = _prepare_shared_services(discovery_rules)
+    if service_masters:
+        base_template.setdefault("items", []).extend(service_masters)
+
     dashboards = base_template.pop("dashboards", [])
     if not isinstance(dashboards, list):
         raise TemplateFormatError("'dashboards' must be a list when present.")
@@ -211,10 +267,26 @@ def create_layered_templates(
         business_template["tags"] = tags
     if macros:
         business_template["macros"] = macros
+
+    business_rules: list[dict[str, Any]] = []
+    for rule in discovery_rules:
+        key = str(rule.get("key", ""))
+        name = str(rule.get("name", "")).lower()
+        if filesystem_matches is not None and ("vfs.fs" in key or "filesystem" in name):
+            business_rules.append(_clone_filesystem_rule(rule, namespace))
+        elif service_matches is not None and _is_service_rule(rule):
+            clone = _clone_service_rule(rule, namespace)
+            if clone is not None:
+                business_rules.append(clone)
+
     _remove_template_objects(
         business_template,
-        ("items", "discovery_rules", "triggers", "graphs", "valuemaps", "dashboards"),
+        ("items", "triggers", "graphs", "valuemaps", "dashboards"),
     )
+    if business_rules:
+        business_template["discovery_rules"] = business_rules
+    else:
+        business_template.pop("discovery_rules", None)
 
     for export in (system_export, business_export):
         export.pop("triggers", None)
@@ -222,6 +294,7 @@ def create_layered_templates(
 
     _rewrite_template_references(base_document, original_technical, base_technical)
     _rewrite_template_references(system_document, original_technical, system_technical)
+    _rewrite_template_references(business_document, original_technical, business_technical)
     _regenerate_uuids(base_document)
     _regenerate_uuids(system_document)
     _regenerate_uuids(business_document)
