@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from ztt.template import TemplateFormatError, ZabbixTemplate
@@ -31,6 +32,19 @@ def _new_uuid() -> str:
     return uuid4().hex
 
 
+def _regenerate_uuids(value: Any) -> None:
+    """Replace every Zabbix UUID recursively in a generated document."""
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key == "uuid" and isinstance(child, str):
+                value[key] = _new_uuid()
+            else:
+                _regenerate_uuids(child)
+    elif isinstance(value, list):
+        for child in value:
+            _regenerate_uuids(child)
+
+
 def create_base_system_layers(
     source: ZabbixTemplate,
     output_dir: Path,
@@ -41,7 +55,8 @@ def create_base_system_layers(
     """Create BASE and SYSTEM exports without modifying the source file.
 
     BASE keeps collection items, macros and shared objects. SYSTEM receives the
-    complete discovery rule blocks and is linked to BASE.
+    complete discovery rule blocks and is linked to BASE. Every UUID is renewed
+    so generated layers can be imported alongside the original template.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -69,11 +84,9 @@ def create_base_system_layers(
     if not isinstance(discovery_rules, list):
         raise TemplateFormatError("'discovery_rules' must be a list when present.")
 
-    base_template["uuid"] = _new_uuid()
     base_template["template"] = base_technical
     base_template["name"] = base_visible
 
-    system_template["uuid"] = _new_uuid()
     system_template["template"] = system_technical
     system_template["name"] = system_visible
     system_template["discovery_rules"] = discovery_rules
@@ -81,6 +94,9 @@ def create_base_system_layers(
 
     for key in ("items", "triggers", "graphs", "dashboards", "macros"):
         system_template.pop(key, None)
+
+    _regenerate_uuids(base_document)
+    _regenerate_uuids(system_document)
 
     write_document(base_file, base_document)
     write_document(system_file, system_document)

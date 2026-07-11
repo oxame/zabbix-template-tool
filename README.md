@@ -69,10 +69,13 @@ Starting from an existing Zabbix YAML export:
 ztt create-layers template-existing.yaml
 ```
 
-The source file is not modified. By default, ZTT creates a `layers` directory containing two files:
+The source file is not modified. By default, ZTT creates the two generated templates in the same directory as the source file.
+
+Example:
 
 ```text
-layers/
+/templates/
+├── template-existing.yaml
 ├── TEMPLATE_NAME_BASE.yaml
 └── TEMPLATE_NAME_SYSTEM.yaml
 ```
@@ -81,10 +84,17 @@ The generated BASE template keeps the collection items, macros and shared object
 
 The generated SYSTEM template receives the complete LLD blocks and is automatically linked to the BASE template.
 
-Choose another output directory:
+Choose another output directory with `--output-dir` or `-o`:
 
 ```bash
 ztt create-layers template-existing.yaml --output-dir generated
+```
+
+The output path can be relative or absolute:
+
+```bash
+ztt create-layers /data/templates/template-existing.yaml \
+  --output-dir /data/templates/generated
 ```
 
 Choose the technical-name prefix:
@@ -114,9 +124,9 @@ ztt create-layers template-existing.yaml \
 Before importing, inspect the generated templates:
 
 ```bash
-ztt info generated/TEMPLATE_LINUX_BASE.yaml
-ztt info generated/TEMPLATE_LINUX_SYSTEM.yaml
-ztt analyze generated/TEMPLATE_LINUX_SYSTEM.yaml
+ztt info TEMPLATE_NAME_BASE.yaml
+ztt info TEMPLATE_NAME_SYSTEM.yaml
+ztt analyze TEMPLATE_NAME_SYSTEM.yaml
 ```
 
 Import BASE first, then SYSTEM. SYSTEM already contains the link to BASE.
@@ -165,16 +175,24 @@ By default, `move-lld` creates `.bak` copies before modifying files.
 
 ## Recommended workflow
 
+Generate files beside the source template:
+
 ```bash
 ztt info template-existing.yaml
 ztt list-lld template-existing.yaml
 ztt analyze template-existing.yaml
+ztt create-layers template-existing.yaml --prefix TEMPLATE_LINUX
+ztt info TEMPLATE_LINUX_BASE.yaml
+ztt info TEMPLATE_LINUX_SYSTEM.yaml
+ztt analyze TEMPLATE_LINUX_SYSTEM.yaml
+```
+
+Or generate them in a dedicated directory:
+
+```bash
 ztt create-layers template-existing.yaml \
   --output-dir generated \
   --prefix TEMPLATE_LINUX
-ztt info generated/TEMPLATE_LINUX_BASE.yaml
-ztt info generated/TEMPLATE_LINUX_SYSTEM.yaml
-ztt analyze generated/TEMPLATE_LINUX_SYSTEM.yaml
 ```
 
 Keep the original export in Git and test the generated files in a qualification environment before importing them into production.
