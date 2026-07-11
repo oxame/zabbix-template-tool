@@ -8,8 +8,13 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from ztt.business import _clone_filesystem_rule, _clone_service_rule
+from ztt.business import (
+    _clone_filesystem_rule,
+    _clone_service_rule,
+    _select_required_valuemaps,
+)
 from ztt.template import TemplateFormatError, ZabbixTemplate
+from ztt.validation import ensure_valid_template
 from ztt.writer import write_document
 
 
@@ -124,6 +129,7 @@ def _is_service_rule(rule: dict[str, Any]) -> bool:
 
 def _service_master_item(rule: dict[str, Any]) -> dict[str, Any]:
     """Convert a native service discovery rule into a reusable raw item."""
+
     allowed = {
         "name",
         "type",
@@ -184,8 +190,8 @@ def create_layered_templates(
     service_not_matches: str | None = None,
 ) -> LayerCreationResult:
     """Create BASE, SYSTEM and a configurable BUSINESS template."""
-    output_dir.mkdir(parents=True, exist_ok=True)
 
+    output_dir.mkdir(parents=True, exist_ok=True)
     original_technical = str(source.template.get("template", "TEMPLATE"))
     original_visible = str(source.template.get("name", original_technical))
     root_name = _slug(prefix or original_technical)
@@ -228,8 +234,9 @@ def create_layered_templates(
     if not isinstance(dashboards, list):
         raise TemplateFormatError("'dashboards' must be a list when present.")
 
-    required_valuemaps = _select_valuemaps(
-        system_template.get("valuemaps", []),
+    source_valuemaps = system_template.get("valuemaps", [])
+    required_system_valuemaps = _select_valuemaps(
+        source_valuemaps,
         _collect_valuemap_names(discovery_rules),
     )
 
@@ -245,8 +252,8 @@ def create_layered_templates(
         system_template["tags"] = tags
     else:
         system_template.pop("tags", None)
-    if required_valuemaps:
-        system_template["valuemaps"] = required_valuemaps
+    if required_system_valuemaps:
+        system_template["valuemaps"] = required_system_valuemaps
     else:
         system_template.pop("valuemaps", None)
     _remove_template_objects(system_template, ("items", "triggers", "graphs", "macros", "dashboards"))
@@ -279,6 +286,7 @@ def create_layered_templates(
             if clone is not None:
                 business_rules.append(clone)
 
+    required_business_valuemaps = _select_required_valuemaps(source_valuemaps, business_rules)
     _remove_template_objects(
         business_template,
         ("items", "triggers", "graphs", "valuemaps", "dashboards"),
@@ -287,6 +295,8 @@ def create_layered_templates(
         business_template["discovery_rules"] = business_rules
     else:
         business_template.pop("discovery_rules", None)
+    if required_business_valuemaps:
+        business_template["valuemaps"] = required_business_valuemaps
 
     for export in (system_export, business_export):
         export.pop("triggers", None)
@@ -299,6 +309,7 @@ def create_layered_templates(
     _regenerate_uuids(system_document)
     _regenerate_uuids(business_document)
 
+    ensure_valid_template(ZabbixTemplate.from_document(business_file, business_document))
     write_document(base_file, base_document)
     write_document(system_file, system_document)
     write_document(business_file, business_document)
@@ -323,6 +334,7 @@ def create_base_system_layers(
     overwrite: bool = False,
 ) -> LayerCreationResult:
     """Backward-compatible alias for the three-layer generator."""
+
     return create_layered_templates(
         source,
         output_dir,
