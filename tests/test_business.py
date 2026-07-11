@@ -4,7 +4,7 @@ from ztt.business import create_business_template
 from ztt.loader import load_template
 
 
-def test_create_additional_business_with_filesystem_lld(tmp_path: Path) -> None:
+def test_create_additional_business_with_filesystem_and_service_lld(tmp_path: Path) -> None:
     system_file = tmp_path / "SYSTEM.yaml"
     system_file.write_text(
         """zabbix_export:
@@ -34,7 +34,10 @@ def test_create_additional_business_with_filesystem_lld(tmp_path: Path) -> None:
               key: vfs.fs.size[{#FSNAME},used]
         - uuid: 44444444444444444444444444444444
           name: Windows services discovery
-          key: service.discovery
+          type: DEPENDENT
+          key: ztt.system.service.discovery
+          master_item:
+            key: service.discovery
           item_prototypes:
             - uuid: 55555555555555555555555555555555
               name: Service state
@@ -59,18 +62,26 @@ def test_create_additional_business_with_filesystem_lld(tmp_path: Path) -> None:
     business = load_template(result.file)
     assert result.file.name == "WINDOWS_BDD.yaml"
     assert result.filesystem_rules == 1
-    assert result.service_rules == 0
-    assert result.skipped_service_rules == 1
+    assert result.service_rules == 1
+    assert result.skipped_service_rules == 0
     assert business.template["templates"] == [{"name": "WINDOWS_SYSTEM"}]
-    rule = business.template["discovery_rules"][0]
-    assert rule["key"] == "ztt.business.bdd.fs.discovery"
-    assert rule["item_prototypes"][0]["key"] == "ztt.business.bdd.vfs.fs.size[{#FSNAME},used]"
-    assert rule["master_item"]["key"] == "vfs.fs.get"
+
+    filesystem_rule, service_rule = business.template["discovery_rules"]
+    assert filesystem_rule["key"] == "ztt.business.bdd.fs.discovery"
+    assert filesystem_rule["item_prototypes"][0]["key"] == (
+        "ztt.business.bdd.vfs.fs.size[{#FSNAME},used]"
+    )
+    assert filesystem_rule["master_item"]["key"] == "vfs.fs.get"
+    assert service_rule["key"] == "ztt.business.bdd.service.discovery"
+    assert service_rule["item_prototypes"][0]["key"] == (
+        "ztt.business.bdd.service.info[{#SERVICE.NAME},state]"
+    )
+    assert service_rule["master_item"]["key"] == "service.discovery"
+
     assert business.template["tags"] == [
         {"tag": "layer", "value": "business"},
         {"tag": "application", "value": "bdd"},
     ]
-    assert business.template["macros"][0] == {
-        "macro": "{$BUSINESS.FS.MATCHES}",
-        "value": "data|u01",
-    }
+    macros = {entry["macro"]: entry["value"] for entry in business.template["macros"]}
+    assert macros["{$BUSINESS.FS.MATCHES}"] == "data|u01"
+    assert macros["{$BUSINESS.SERVICE.MATCHES}"] == "Oracle.*"
