@@ -8,10 +8,18 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+
     steps:
       - uses: actions/checkout@v4
         with:
           show-progress: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
       - name: Install
         run: pip install -q -e ".[dev]"
       - name: Lint
