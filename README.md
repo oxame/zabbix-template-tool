@@ -84,7 +84,7 @@ The generated BASE template keeps collection items, macros, standalone triggers,
 
 The generated SYSTEM template receives complete LLD blocks, the Value Maps required by their prototypes and dashboard widgets that reference graph prototypes. It is automatically linked to BASE.
 
-When a dashboard mixes BASE widgets (`ITEM` or `GRAPH`) and SYSTEM widgets (`GRAPH_PROTOTYPE`), ZTT creates a filtered copy in each layer so that every imported dashboard only references objects available in its own template.
+When a dashboard mixes BASE widgets (`ITEM` or `GRAPH`) and SYSTEM widgets (`GRAPH_PROTOTYPE`), ZTT creates a filtered copy in each layer. This prevents Zabbix from resolving a widget against an object that is unavailable in the template currently being imported.
 
 Choose another output directory with `--output-dir` or `-o`:
 
