@@ -58,6 +58,34 @@ def _rewrite_strings(value: Any, replacements: dict[str, str]) -> None:
             _rewrite_strings(child, replacements)
 
 
+def _collect_valuemap_names(value: Any) -> set[str]:
+    names: set[str] = set()
+    if isinstance(value, dict):
+        valuemap = value.get("valuemap")
+        if isinstance(valuemap, dict):
+            name = valuemap.get("name")
+            if isinstance(name, str) and name:
+                names.add(name)
+        for child in value.values():
+            names.update(_collect_valuemap_names(child))
+    elif isinstance(value, list):
+        for child in value:
+            names.update(_collect_valuemap_names(child))
+    return names
+
+
+def _select_valuemaps(valuemaps: Any, names: set[str]) -> list[Any]:
+    if not names:
+        return []
+    if not isinstance(valuemaps, list):
+        raise TemplateFormatError("'valuemaps' must be a list when present.")
+    return [
+        deepcopy(valuemap)
+        for valuemap in valuemaps
+        if isinstance(valuemap, dict) and valuemap.get("name") in names
+    ]
+
+
 def _normalise_tags(tags: dict[str, str] | None) -> list[dict[str, str]]:
     if not tags:
         return []
@@ -206,6 +234,7 @@ def create_business_template(
     discovery_rules = template.get("discovery_rules", [])
     if not isinstance(discovery_rules, list):
         raise TemplateFormatError("'discovery_rules' must be a list when present.")
+    source_valuemaps = template.get("valuemaps", [])
 
     selected: list[dict[str, Any]] = []
     fs_count = 0
@@ -227,6 +256,11 @@ def create_business_template(
                 selected.append(clone)
                 service_count += 1
 
+    required_valuemaps = _select_valuemaps(
+        source_valuemaps,
+        _collect_valuemap_names(selected),
+    )
+
     template["template"] = business_technical
     template["name"] = f"{visible_name.removesuffix(' SYSTEM')} {business_name}"
     template["templates"] = [{"name": system_name}]
@@ -238,6 +272,8 @@ def create_business_template(
         template["discovery_rules"] = selected
     else:
         template.pop("discovery_rules", None)
+    if required_valuemaps:
+        template["valuemaps"] = required_valuemaps
 
     tags = _normalise_tags(business_tags)
     if tags:
