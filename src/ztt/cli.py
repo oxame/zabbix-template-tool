@@ -8,17 +8,14 @@ from rich.console import Console
 from rich.table import Table
 
 from ztt import __version__
+from ztt.business import create_business_template
 from ztt.dependencies import analyze_lld_dependencies
 from ztt.layers import create_layered_templates
 from ztt.lld import list_discovery_rules, move_discovery_rules
 from ztt.loader import load_template
 from ztt.template import TemplateFormatError
 
-app = typer.Typer(
-    name="ztt",
-    help="Inspect and refactor Zabbix YAML templates.",
-    no_args_is_help=True,
-)
+app = typer.Typer(name="ztt", help="Inspect and refactor Zabbix YAML templates.", no_args_is_help=True)
 console = Console()
 
 
@@ -32,12 +29,7 @@ def version_callback(value: bool) -> None:
 def main(
     version: Annotated[
         bool,
-        typer.Option(
-            "--version",
-            callback=version_callback,
-            is_eager=True,
-            help="Show version.",
-        ),
+        typer.Option("--version", callback=version_callback, is_eager=True, help="Show version."),
     ] = False,
 ) -> None:
     """Zabbix Template Tool."""
@@ -52,10 +44,9 @@ def _parse_tags(value: str) -> dict[str, str]:
         if "=" not in entry:
             raise ValueError(f"Invalid tag '{entry}'. Expected name=value.")
         name, tag_value = entry.split("=", 1)
-        name = name.strip()
-        if not name:
+        if not name.strip():
             raise ValueError("Tag name cannot be empty.")
-        tags[name] = tag_value.strip()
+        tags[name.strip()] = tag_value.strip()
     return tags
 
 
@@ -66,19 +57,17 @@ def info(
         typer.Argument(exists=False, dir_okay=False, readable=True, help="Zabbix YAML export."),
     ],
 ) -> None:
-    """Display a summary of the first template contained in a YAML export."""
+    """Display a summary of the first template in a YAML export."""
     try:
         summary = load_template(template_file).summary()
     except (FileNotFoundError, PermissionError, TemplateFormatError) as exc:
         _exit_with_error(exc)
-
     metadata = Table(show_header=False, box=None)
     metadata.add_row("File", str(summary.file))
     metadata.add_row("Export version", summary.export_version)
     metadata.add_row("Template", summary.template_name)
     metadata.add_row("Visible name", summary.visible_name)
     console.print(metadata)
-
     counts = Table(title="Objects")
     counts.add_column("Type")
     counts.add_column("Count", justify="right")
@@ -98,26 +87,20 @@ def list_lld(
         typer.Argument(exists=False, dir_okay=False, readable=True, help="Zabbix YAML export."),
     ],
 ) -> None:
-    """List low-level discovery rules and their nested prototype counts."""
+    """List low-level discovery rules and nested prototype counts."""
     try:
         template = load_template(template_file)
         rules = list_discovery_rules(template)
     except (FileNotFoundError, PermissionError, TemplateFormatError) as exc:
         _exit_with_error(exc)
-
     title = template.template.get("name", template.path.name)
     table = Table(title=f"LLD rules — {title}")
     for column in ("#", "Name", "Key", "Items", "Triggers", "Graphs", "Overrides"):
         table.add_column(column)
     for rule in rules:
         table.add_row(
-            str(rule.index),
-            rule.name,
-            rule.key,
-            str(rule.item_prototypes),
-            str(rule.trigger_prototypes),
-            str(rule.graph_prototypes),
-            str(rule.overrides),
+            str(rule.index), rule.name, rule.key, str(rule.item_prototypes),
+            str(rule.trigger_prototypes), str(rule.graph_prototypes), str(rule.overrides),
         )
     console.print(table)
     if not rules:
@@ -136,7 +119,6 @@ def analyze(
         reports = analyze_lld_dependencies(load_template(template_file))
     except (FileNotFoundError, PermissionError, TemplateFormatError) as exc:
         _exit_with_error(exc)
-
     for report in reports:
         table = Table(title=f"{report.rule_name} — {report.rule_key}")
         for column in ("Status", "Type", "Reference", "Location"):
@@ -153,43 +135,20 @@ def analyze(
 
 @app.command("create-layers")
 def create_layers(
-    source_file: Annotated[
-        Path,
-        typer.Argument(exists=False, dir_okay=False, readable=True, help="Existing Zabbix YAML template export."),
-    ],
-    output_dir: Annotated[
-        Path | None,
-        typer.Option("--output-dir", "-o", help="Generated-file directory; defaults beside source."),
-    ] = None,
-    prefix: Annotated[
-        str | None,
-        typer.Option("--prefix", help="Technical-name prefix for generated templates."),
-    ] = None,
-    business_name: Annotated[
-        str | None,
-        typer.Option("--business-name", help="Business layer name, e.g. Oracle, SQL or Liaison."),
-    ] = None,
-    interactive: Annotated[
-        bool,
-        typer.Option("--interactive/--no-interactive", help="Ask for BUSINESS macros and tags."),
-    ] = False,
-    overwrite: Annotated[
-        bool,
-        typer.Option("--overwrite", help="Replace existing generated files."),
-    ] = False,
+    source_file: Annotated[Path, typer.Argument(exists=False, dir_okay=False, readable=True)],
+    output_dir: Annotated[Path | None, typer.Option("--output-dir", "-o")] = None,
+    prefix: Annotated[str | None, typer.Option("--prefix")] = None,
+    business_name: Annotated[str | None, typer.Option("--business-name")] = None,
+    interactive: Annotated[bool, typer.Option("--interactive/--no-interactive")] = False,
+    overwrite: Annotated[bool, typer.Option("--overwrite")] = False,
 ) -> None:
     """Create linked BASE, SYSTEM and configurable BUSINESS templates."""
     try:
         source = load_template(source_file)
         destination = output_dir if output_dir is not None else source.path.parent
-
-        fs_matches: str | None = None
-        fs_not_matches: str | None = None
-        service_matches: str | None = None
-        service_not_matches: str | None = None
-        system_tags: dict[str, str] = {"layer": "system"}
-        business_tags: dict[str, str] = {"layer": "business"}
-
+        fs_matches = fs_not_matches = service_matches = service_not_matches = None
+        system_tags = {"layer": "system"}
+        business_tags = {"layer": "business"}
         if interactive:
             business_name = typer.prompt("Nom du template BUSINESS", default=business_name or "BUSINESS")
             if typer.confirm("Renseigner les macros Filesystem métier ?", default=False):
@@ -198,92 +157,101 @@ def create_layers(
             if typer.confirm("Renseigner les macros Services métier ?", default=False):
                 service_matches = typer.prompt("{$BUSINESS.SERVICE.MATCHES}", default=".*")
                 service_not_matches = typer.prompt("{$BUSINESS.SERVICE.NOT_MATCHES}", default="")
-            system_tags = _parse_tags(
-                typer.prompt("Tags SYSTEM (nom=valeur, séparés par des virgules)", default="layer=system")
-            )
-            default_business_tags = f"layer=business,application={business_name.lower()}"
-            business_tags = _parse_tags(
-                typer.prompt(
-                    "Tags BUSINESS (nom=valeur, séparés par des virgules)",
-                    default=default_business_tags,
-                )
-            )
+            system_tags = _parse_tags(typer.prompt("Tags SYSTEM", default="layer=system"))
+            default_tags = f"layer=business,application={(business_name or 'business').lower()}"
+            business_tags = _parse_tags(typer.prompt("Tags BUSINESS", default=default_tags))
         else:
             business_name = business_name or "BUSINESS"
-
         result = create_layered_templates(
-            source,
-            destination,
-            prefix=prefix,
-            overwrite=overwrite,
-            business_name=business_name,
-            system_tags=system_tags,
-            business_tags=business_tags,
-            filesystem_matches=fs_matches,
-            filesystem_not_matches=fs_not_matches,
-            service_matches=service_matches,
-            service_not_matches=service_not_matches,
+            source, destination, prefix=prefix, overwrite=overwrite,
+            business_name=business_name, system_tags=system_tags, business_tags=business_tags,
+            filesystem_matches=fs_matches, filesystem_not_matches=fs_not_matches,
+            service_matches=service_matches, service_not_matches=service_not_matches,
         )
-    except (
-        FileNotFoundError,
-        FileExistsError,
-        PermissionError,
-        TemplateFormatError,
-        ValueError,
-    ) as exc:
+    except (FileNotFoundError, FileExistsError, PermissionError, TemplateFormatError, ValueError) as exc:
         _exit_with_error(exc)
-
     console.print("[bold green]Layered templates created.[/bold green]")
     console.print(f"BASE     : {result.base_file} ({result.base_template})")
     console.print(f"SYSTEM   : {result.system_file} ({result.system_template})")
     console.print(f"BUSINESS : {result.business_file} ({result.business_template})")
     console.print(f"LLD rules transferred to SYSTEM: {result.discovery_rules}")
     console.print(f"[yellow]Dashboards skipped temporarily: {result.dashboards}[/yellow]")
-    console.print("Business discovery macros are prepared; LLD cloning is not enabled yet.")
     console.print("Import order: BASE, SYSTEM, then BUSINESS.")
-    console.print("The source YAML file was not modified.")
+
+
+@app.command("create-business")
+def create_business(
+    system_file: Annotated[Path, typer.Argument(exists=False, dir_okay=False, readable=True)],
+    business_name: Annotated[str | None, typer.Option("--business-name")] = None,
+    output_dir: Annotated[Path | None, typer.Option("--output-dir", "-o")] = None,
+    interactive: Annotated[bool, typer.Option("--interactive/--no-interactive")] = False,
+    filesystems: Annotated[bool, typer.Option("--filesystems/--no-filesystems")] = False,
+    services: Annotated[bool, typer.Option("--services/--no-services")] = False,
+    overwrite: Annotated[bool, typer.Option("--overwrite")] = False,
+) -> None:
+    """Create an additional BUSINESS template from an existing SYSTEM export."""
+    try:
+        system = load_template(system_file)
+        destination = output_dir if output_dir is not None else system.path.parent
+        fs_matches = fs_not_matches = service_matches = service_not_matches = None
+        if interactive:
+            business_name = typer.prompt("Nom du template BUSINESS", default=business_name or "BUSINESS")
+            filesystems = typer.confirm("Ajouter la LLD Filesystem métier ?", default=True)
+            if filesystems:
+                fs_matches = typer.prompt("{$BUSINESS.FS.MATCHES}", default=".*")
+                fs_not_matches = typer.prompt("{$BUSINESS.FS.NOT_MATCHES}", default="")
+            services = typer.confirm("Ajouter la LLD Services métier ?", default=False)
+            if services:
+                service_matches = typer.prompt("{$BUSINESS.SERVICE.MATCHES}", default=".*")
+                service_not_matches = typer.prompt("{$BUSINESS.SERVICE.NOT_MATCHES}", default="")
+            tags = _parse_tags(
+                typer.prompt(
+                    "Tags BUSINESS",
+                    default=f"layer=business,application={(business_name or 'business').lower()}",
+                )
+            )
+        else:
+            business_name = business_name or "BUSINESS"
+            tags = {"layer": "business", "application": business_name.lower()}
+            if filesystems:
+                fs_matches, fs_not_matches = ".*", ""
+            if services:
+                service_matches, service_not_matches = ".*", ""
+        result = create_business_template(
+            system, destination, business_name=business_name, overwrite=overwrite,
+            include_filesystems=filesystems, include_services=services,
+            business_tags=tags, filesystem_matches=fs_matches,
+            filesystem_not_matches=fs_not_matches, service_matches=service_matches,
+            service_not_matches=service_not_matches,
+        )
+    except (FileNotFoundError, FileExistsError, PermissionError, TemplateFormatError, ValueError) as exc:
+        _exit_with_error(exc)
+    console.print(f"[bold green]BUSINESS template created:[/bold green] {result.file}")
+    console.print(f"Filesystem LLD cloned: {result.filesystem_rules}")
+    console.print(f"Service LLD cloned: {result.service_rules}")
+    if result.skipped_service_rules:
+        console.print(
+            f"[yellow]Service LLD skipped (no master item): {result.skipped_service_rules}[/yellow]"
+        )
 
 
 @app.command("move-lld")
 def move_lld(
-    source_file: Annotated[
-        Path,
-        typer.Argument(exists=False, dir_okay=False, readable=True),
-    ],
-    destination_file: Annotated[
-        Path,
-        typer.Argument(exists=False, dir_okay=False, readable=True),
-    ],
-    select: Annotated[
-        list[str] | None,
-        typer.Option("--select", "-s", help="Exact LLD name, key, or UUID."),
-    ] = None,
-    move_all: Annotated[
-        bool,
-        typer.Option("--all", help="Move every LLD rule from the source."),
-    ] = False,
-    apply: Annotated[
-        bool,
-        typer.Option("--apply", help="Write changes; otherwise only simulate."),
-    ] = False,
-    backup: Annotated[
-        bool,
-        typer.Option("--backup/--no-backup", help="Create .bak copies before writing."),
-    ] = True,
+    source_file: Annotated[Path, typer.Argument(exists=False, dir_okay=False, readable=True)],
+    destination_file: Annotated[Path, typer.Argument(exists=False, dir_okay=False, readable=True)],
+    select: Annotated[list[str] | None, typer.Option("--select", "-s")] = None,
+    move_all: Annotated[bool, typer.Option("--all")] = False,
+    apply: Annotated[bool, typer.Option("--apply")] = False,
+    backup: Annotated[bool, typer.Option("--backup/--no-backup")] = True,
 ) -> None:
-    """Move complete LLD rule blocks from one template export to another."""
+    """Move complete LLD rule blocks between two template exports."""
     try:
         result = move_discovery_rules(
-            load_template(source_file),
-            load_template(destination_file),
-            selectors=select,
-            move_all=move_all,
-            dry_run=not apply,
-            backup=backup,
+            load_template(source_file), load_template(destination_file), selectors=select,
+            move_all=move_all, dry_run=not apply, backup=backup,
         )
     except (FileNotFoundError, PermissionError, TemplateFormatError) as exc:
         _exit_with_error(exc)
-
     mode = "Simulation" if result.dry_run else "Applied"
     console.print(f"[bold]{mode}:[/bold] {len(result.moved)} LLD rule(s)")
     for rule in result.moved:
