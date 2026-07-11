@@ -212,11 +212,11 @@ ruff check .
 
 ## Roadmap
 
-- `v0.1`: inspection, structural validation and atomic LLD moves.
-- `v0.2`: dependency analysis and automatic BASE/SYSTEM creation.
-- `v0.3`: automatic dependency transfer and standalone object moves.
-- `v0.4`: complete BASE/SYSTEM/BUSINESS split and merge.
-- `v1.0`: graphical interface.
+The detailed project roadmap covers dependency management, full BASE/SYSTEM/BUSINESS generation, project mode, Git integration, Zabbix API exports, intelligent diff, documentation, CI/CD and the future graphical interface.
+
+See [ROADMAP.md](ROADMAP.md).
+
+The Zabbix API export feature is also tracked in [issue #6](https://github.com/oxame/zabbix-template-tool/issues/6).
 
 ## License
 
