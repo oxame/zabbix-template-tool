@@ -135,7 +135,6 @@ def test_rewrite_references_and_copy_required_valuemaps(tmp_path: Path) -> None:
     base = load_template(result.base_file)
     system = load_template(result.system_file)
 
-    assert "dashboards" not in base.template
     assert "triggers" in base.document["zabbix_export"]
     assert "graphs" in base.document["zabbix_export"]
     assert "/LAYERED_BASE/base.key" in base.document["zabbix_export"]["triggers"][0][
@@ -153,11 +152,14 @@ def test_rewrite_references_and_copy_required_valuemaps(tmp_path: Path) -> None:
         "trigger_prototypes"
     ][0]["expression"]
 
-    widgets = system.template["dashboards"][0]["pages"][0]["widgets"]
-    prototype_host = widgets[0]["fields"][0]["value"]["host"]
-    item_host = widgets[1]["fields"][0]["value"]["host"]
-    assert prototype_host == "LAYERED_SYSTEM"
-    assert item_host == "LAYERED_BASE"
+    base_widgets = base.template["dashboards"][0]["pages"][0]["widgets"]
+    system_widgets = system.template["dashboards"][0]["pages"][0]["widgets"]
+    assert len(base_widgets) == 1
+    assert len(system_widgets) == 1
+    assert base_widgets[0]["fields"][0]["type"] == "ITEM"
+    assert base_widgets[0]["fields"][0]["value"]["host"] == "LAYERED_BASE"
+    assert system_widgets[0]["fields"][0]["type"] == "GRAPH_PROTOTYPE"
+    assert system_widgets[0]["fields"][0]["value"]["host"] == "LAYERED_SYSTEM"
 
 
 def test_refuse_existing_outputs(tmp_path: Path) -> None:
