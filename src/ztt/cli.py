@@ -201,7 +201,9 @@ def create_layers(
     console.print(f"SYSTEM   : {result.system_file} ({result.system_template})")
     console.print(f"BUSINESS : {result.business_file} ({result.business_template})")
     console.print(f"LLD rules transferred to SYSTEM: {result.discovery_rules}")
-    console.print(f"Dashboards transferred to BUSINESS: {result.dashboards}")
+    console.print(
+        f"[yellow]Dashboards skipped temporarily: {result.dashboards}[/yellow]"
+    )
     console.print("Import order: BASE, SYSTEM, then BUSINESS.")
     console.print("The source YAML file was not modified.")
 
