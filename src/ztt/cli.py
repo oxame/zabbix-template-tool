@@ -172,7 +172,7 @@ def create_layers(
     interactive: Annotated[
         bool,
         typer.Option("--interactive/--no-interactive", help="Ask for BUSINESS macros and tags."),
-    ] = True,
+    ] = False,
     overwrite: Annotated[
         bool,
         typer.Option("--overwrite", help="Replace existing generated files."),
