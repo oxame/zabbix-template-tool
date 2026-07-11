@@ -24,4 +24,4 @@ jobs:
         continue-on-error: true
         run: ruff check .
       - name: Test
-        run: pytest
+        run: pytest -q --tb=short
