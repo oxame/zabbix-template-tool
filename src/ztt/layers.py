@@ -60,32 +60,54 @@ def _rewrite_template_references(value: Any, old: str, new: str) -> None:
             _rewrite_template_references(child, old, new)
 
 
-def _rewrite_dashboard_references(
-    dashboards: list[Any],
-    original: str,
-    base_template: str,
-    system_template: str,
-) -> None:
-    """Point dashboard widgets to the layer that owns the referenced object."""
+def _widget_layer(widget: Any) -> str:
+    """Return the owning layer for a dashboard widget."""
+    if not isinstance(widget, dict):
+        return "base"
+    for field in widget.get("fields", []):
+        if isinstance(field, dict) and field.get("type") == "GRAPH_PROTOTYPE":
+            return "system"
+    return "base"
+
+
+def _split_dashboards(dashboards: list[Any]) -> tuple[list[Any], list[Any]]:
+    """Split mixed dashboards so every widget references objects in one layer."""
+    base_dashboards: list[Any] = []
+    system_dashboards: list[Any] = []
+
     for dashboard in dashboards:
         if not isinstance(dashboard, dict):
             continue
+        base_dashboard = deepcopy(dashboard)
+        system_dashboard = deepcopy(dashboard)
+        base_pages: list[Any] = []
+        system_pages: list[Any] = []
+
         for page in dashboard.get("pages", []):
             if not isinstance(page, dict):
                 continue
-            for widget in page.get("widgets", []):
-                if not isinstance(widget, dict):
-                    continue
-                for field in widget.get("fields", []):
-                    if not isinstance(field, dict):
-                        continue
-                    reference = field.get("value")
-                    if not isinstance(reference, dict) or reference.get("host") != original:
-                        continue
-                    if field.get("type") == "GRAPH_PROTOTYPE":
-                        reference["host"] = system_template
-                    else:
-                        reference["host"] = base_template
+            base_page = deepcopy(page)
+            system_page = deepcopy(page)
+            widgets = page.get("widgets", [])
+            if not isinstance(widgets, list):
+                widgets = []
+            base_widgets = [deepcopy(w) for w in widgets if _widget_layer(w) == "base"]
+            system_widgets = [deepcopy(w) for w in widgets if _widget_layer(w) == "system"]
+            if base_widgets:
+                base_page["widgets"] = base_widgets
+                base_pages.append(base_page)
+            if system_widgets:
+                system_page["widgets"] = system_widgets
+                system_pages.append(system_page)
+
+        if base_pages:
+            base_dashboard["pages"] = base_pages
+            base_dashboards.append(base_dashboard)
+        if system_pages:
+            system_dashboard["pages"] = system_pages
+            system_dashboards.append(system_dashboard)
+
+    return base_dashboards, system_dashboards
 
 
 def _collect_valuemap_names(value: Any) -> set[str]:
@@ -127,10 +149,9 @@ def create_base_system_layers(
 ) -> LayerCreationResult:
     """Create coherent BASE and SYSTEM exports without modifying the source.
 
-    BASE owns collection items, macros, value maps, standalone triggers and
-    graphs. SYSTEM owns LLD rules, the value maps they require, and dashboards,
-    and inherits BASE. References are rewritten to the technical names of the
-    generated layers and every UUID is renewed.
+    BASE owns collection items, macros, value maps, standalone triggers, graphs,
+    and dashboard widgets that use them. SYSTEM owns LLD rules, their required
+    value maps, graph-prototype dashboard widgets, and inherits BASE.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -163,6 +184,7 @@ def create_base_system_layers(
     dashboards = base_template.pop("dashboards", [])
     if not isinstance(dashboards, list):
         raise TemplateFormatError("'dashboards' must be a list when present.")
+    base_dashboards, system_dashboards = _split_dashboards(dashboards)
 
     required_valuemap_names = _collect_valuemap_names(discovery_rules)
     required_valuemaps = _select_valuemaps(
@@ -172,13 +194,17 @@ def create_base_system_layers(
 
     base_template["template"] = base_technical
     base_template["name"] = base_visible
+    if base_dashboards:
+        base_template["dashboards"] = base_dashboards
 
     system_template["template"] = system_technical
     system_template["name"] = system_visible
     system_template["discovery_rules"] = discovery_rules
     system_template["templates"] = [{"name": base_technical}]
-    if dashboards:
-        system_template["dashboards"] = dashboards
+    if system_dashboards:
+        system_template["dashboards"] = system_dashboards
+    else:
+        system_template.pop("dashboards", None)
     if required_valuemaps:
         system_template["valuemaps"] = required_valuemaps
     else:
@@ -187,19 +213,9 @@ def create_base_system_layers(
     for key in ("items", "triggers", "graphs", "macros"):
         system_template.pop(key, None)
 
-    # Export-level triggers and graphs reference standalone BASE items. They must
-    # not be duplicated in SYSTEM because SYSTEM inherits them from BASE.
     system_export.pop("triggers", None)
     system_export.pop("graphs", None)
 
-    # Dashboard references must be classified before the generic SYSTEM rewrite,
-    # otherwise every widget would incorrectly point to SYSTEM.
-    _rewrite_dashboard_references(
-        dashboards,
-        original_technical,
-        base_technical,
-        system_technical,
-    )
     _rewrite_template_references(base_document, original_technical, base_technical)
     _rewrite_template_references(system_document, original_technical, system_technical)
 
