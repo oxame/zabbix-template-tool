@@ -54,6 +54,103 @@ def test_create_base_and_system_layers(tmp_path: Path) -> None:
     assert base_uuids.isdisjoint(system_uuids)
 
 
+def test_rewrite_references_and_move_dashboards(tmp_path: Path) -> None:
+    source_file = tmp_path / "source.yaml"
+    source_file.write_text(
+        """zabbix_export:
+  version: '7.4'
+  templates:
+    - uuid: 11111111111111111111111111111111
+      template: ORIGINAL
+      name: Original
+      groups:
+        - name: Templates/Test
+      items:
+        - uuid: 22222222222222222222222222222222
+          name: Standalone item
+          key: base.key
+      discovery_rules:
+        - uuid: 33333333333333333333333333333333
+          name: LLD
+          key: discovery.key
+          trigger_prototypes:
+            - uuid: 44444444444444444444444444444444
+              name: Prototype trigger
+              expression: last(/ORIGINAL/prototype.key[{#ID}])=1
+      macros:
+        - macro: '{$TEST}'
+          value: '1'
+      valuemaps:
+        - uuid: 55555555555555555555555555555555
+          name: Test map
+          mappings: []
+      dashboards:
+        - uuid: 66666666666666666666666666666666
+          name: Overview
+          pages:
+            - widgets:
+                - type: graphprototype
+                  fields:
+                    - type: GRAPH_PROTOTYPE
+                      name: graphid.0
+                      value:
+                        host: ORIGINAL
+                        name: Prototype graph
+                - type: graph
+                  fields:
+                    - type: ITEM
+                      name: itemid.0
+                      value:
+                        host: ORIGINAL
+                        key: base.key
+  triggers:
+    - uuid: 77777777777777777777777777777777
+      name: Base trigger
+      expression: last(/ORIGINAL/base.key)=1
+  graphs:
+    - uuid: 88888888888888888888888888888888
+      name: Base graph
+      graph_items:
+        - item:
+            host: ORIGINAL
+            key: base.key
+""",
+        encoding="utf-8",
+    )
+
+    result = create_base_system_layers(
+        load_template(source_file),
+        tmp_path / "out",
+        prefix="LAYERED",
+    )
+    base = load_template(result.base_file)
+    system = load_template(result.system_file)
+
+    assert "dashboards" not in base.template
+    assert "triggers" in base.document["zabbix_export"]
+    assert "graphs" in base.document["zabbix_export"]
+    assert "/LAYERED_BASE/base.key" in base.document["zabbix_export"]["triggers"][0][
+        "expression"
+    ]
+    assert (
+        base.document["zabbix_export"]["graphs"][0]["graph_items"][0]["item"]["host"]
+        == "LAYERED_BASE"
+    )
+
+    assert "triggers" not in system.document["zabbix_export"]
+    assert "graphs" not in system.document["zabbix_export"]
+    assert "valuemaps" not in system.template
+    assert "/LAYERED_SYSTEM/prototype.key" in system.template["discovery_rules"][0][
+        "trigger_prototypes"
+    ][0]["expression"]
+
+    widgets = system.template["dashboards"][0]["pages"][0]["widgets"]
+    prototype_host = widgets[0]["fields"][0]["value"]["host"]
+    item_host = widgets[1]["fields"][0]["value"]["host"]
+    assert prototype_host == "LAYERED_SYSTEM"
+    assert item_host == "LAYERED_BASE"
+
+
 def test_refuse_existing_outputs(tmp_path: Path) -> None:
     source = load_template(SAMPLE)
     create_base_system_layers(source, tmp_path, prefix="TEMPLATE_TEST")
