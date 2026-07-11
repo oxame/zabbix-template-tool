@@ -36,7 +36,6 @@ def _new_uuid() -> str:
 
 
 def _regenerate_uuids(value: Any) -> None:
-    """Replace every Zabbix UUID recursively in a generated document."""
     if isinstance(value, dict):
         for key, child in value.items():
             if key == "uuid" and isinstance(child, str):
@@ -49,7 +48,6 @@ def _regenerate_uuids(value: Any) -> None:
 
 
 def _rewrite_template_references(value: Any, old: str, new: str) -> None:
-    """Rewrite host references and expression paths to a generated template."""
     if isinstance(value, dict):
         for key, child in value.items():
             if key == "host" and child == old:
@@ -64,7 +62,6 @@ def _rewrite_template_references(value: Any, old: str, new: str) -> None:
 
 
 def _collect_valuemap_names(value: Any) -> set[str]:
-    """Collect value-map names referenced anywhere in a discovery-rule subtree."""
     names: set[str] = set()
     if isinstance(value, dict):
         valuemap = value.get("valuemap")
@@ -81,7 +78,6 @@ def _collect_valuemap_names(value: Any) -> set[str]:
 
 
 def _select_valuemaps(valuemaps: Any, names: set[str]) -> list[Any]:
-    """Return only the value maps required by objects moved to SYSTEM."""
     if not names:
         return []
     if not isinstance(valuemaps, list):
@@ -98,34 +94,59 @@ def _remove_template_objects(template: dict[str, Any], keys: tuple[str, ...]) ->
         template.pop(key, None)
 
 
+def _normalise_tags(tags: dict[str, str] | None) -> list[dict[str, str]]:
+    if not tags:
+        return []
+    return [{"tag": tag, "value": value} for tag, value in tags.items() if tag]
+
+
+def _business_macros(
+    filesystem_matches: str | None,
+    filesystem_not_matches: str | None,
+    service_matches: str | None,
+    service_not_matches: str | None,
+) -> list[dict[str, str]]:
+    values = (
+        ("{$BUSINESS.FS.MATCHES}", filesystem_matches),
+        ("{$BUSINESS.FS.NOT_MATCHES}", filesystem_not_matches),
+        ("{$BUSINESS.SERVICE.MATCHES}", service_matches),
+        ("{$BUSINESS.SERVICE.NOT_MATCHES}", service_not_matches),
+    )
+    return [{"macro": macro, "value": value} for macro, value in values if value is not None]
+
+
 def create_layered_templates(
     source: ZabbixTemplate,
     output_dir: Path,
     *,
     prefix: str | None = None,
     overwrite: bool = False,
+    business_name: str = "BUSINESS",
+    system_tags: dict[str, str] | None = None,
+    business_tags: dict[str, str] | None = None,
+    filesystem_matches: str | None = None,
+    filesystem_not_matches: str | None = None,
+    service_matches: str | None = None,
+    service_not_matches: str | None = None,
 ) -> LayerCreationResult:
-    """Create coherent BASE, SYSTEM and BUSINESS exports.
+    """Create BASE, SYSTEM and a configurable BUSINESS template.
 
-    BASE owns collection items, macros, value maps, standalone triggers and
-    graphs. SYSTEM owns LLD rules and the value maps required by prototypes.
-    BUSINESS currently contains only the link to SYSTEM. Dashboards are counted
-    but deliberately skipped until their cross-template references can be
-    validated reliably. Every generated template gets independent UUIDs and the
-    source file is never modified.
+    BUSINESS macros and tags are prepared for future business LLD generation.
+    Dashboards remain deliberately excluded until widget dependencies are safe.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     original_technical = str(source.template.get("template", "TEMPLATE"))
     original_visible = str(source.template.get("name", original_technical))
     root_name = _slug(prefix or original_technical)
+    business_suffix = _slug(business_name or "BUSINESS")
 
     base_technical = f"{root_name}_BASE"
     system_technical = f"{root_name}_SYSTEM"
-    business_technical = f"{root_name}_BUSINESS"
+    business_technical = f"{root_name}_{business_suffix}"
     base_visible = f"{original_visible} BASE"
     system_visible = f"{original_visible} SYSTEM"
-    business_visible = f"{original_visible} BUSINESS"
+    business_visible = f"{original_visible} {business_name or 'BUSINESS'}"
 
     base_file = output_dir / f"{base_technical}.yaml"
     system_file = output_dir / f"{system_technical}.yaml"
@@ -137,7 +158,6 @@ def create_layered_templates(
     base_document = deepcopy(source.document)
     system_document = deepcopy(source.document)
     business_document = deepcopy(source.document)
-
     base_export = base_document["zabbix_export"]
     system_export = system_document["zabbix_export"]
     business_export = business_document["zabbix_export"]
@@ -148,15 +168,13 @@ def create_layered_templates(
     discovery_rules = base_template.pop("discovery_rules", [])
     if not isinstance(discovery_rules, list):
         raise TemplateFormatError("'discovery_rules' must be a list when present.")
-
     dashboards = base_template.pop("dashboards", [])
     if not isinstance(dashboards, list):
         raise TemplateFormatError("'dashboards' must be a list when present.")
 
-    required_valuemap_names = _collect_valuemap_names(discovery_rules)
     required_valuemaps = _select_valuemaps(
         system_template.get("valuemaps", []),
-        required_valuemap_names,
+        _collect_valuemap_names(discovery_rules),
     )
 
     base_template["template"] = base_technical
@@ -166,29 +184,36 @@ def create_layered_templates(
     system_template["name"] = system_visible
     system_template["discovery_rules"] = discovery_rules
     system_template["templates"] = [{"name": base_technical}]
+    tags = _normalise_tags(system_tags)
+    if tags:
+        system_template["tags"] = tags
+    else:
+        system_template.pop("tags", None)
     if required_valuemaps:
         system_template["valuemaps"] = required_valuemaps
     else:
         system_template.pop("valuemaps", None)
-    _remove_template_objects(
-        system_template,
-        ("items", "triggers", "graphs", "macros", "dashboards"),
-    )
+    _remove_template_objects(system_template, ("items", "triggers", "graphs", "macros", "dashboards"))
 
     business_template["template"] = business_technical
     business_template["name"] = business_visible
     business_template["templates"] = [{"name": system_technical}]
+    business_template.pop("tags", None)
+    business_template.pop("macros", None)
+    tags = _normalise_tags(business_tags)
+    macros = _business_macros(
+        filesystem_matches,
+        filesystem_not_matches,
+        service_matches,
+        service_not_matches,
+    )
+    if tags:
+        business_template["tags"] = tags
+    if macros:
+        business_template["macros"] = macros
     _remove_template_objects(
         business_template,
-        (
-            "items",
-            "discovery_rules",
-            "triggers",
-            "graphs",
-            "macros",
-            "valuemaps",
-            "dashboards",
-        ),
+        ("items", "discovery_rules", "triggers", "graphs", "valuemaps", "dashboards"),
     )
 
     for export in (system_export, business_export):
@@ -197,7 +222,6 @@ def create_layered_templates(
 
     _rewrite_template_references(base_document, original_technical, base_technical)
     _rewrite_template_references(system_document, original_technical, system_technical)
-
     _regenerate_uuids(base_document)
     _regenerate_uuids(system_document)
     _regenerate_uuids(business_document)
