@@ -9,7 +9,7 @@ from rich.table import Table
 
 from ztt import __version__
 from ztt.dependencies import analyze_lld_dependencies
-from ztt.layers import create_base_system_layers
+from ztt.layers import create_layered_templates
 from ztt.lld import list_discovery_rules, move_discovery_rules
 from ztt.loader import load_template
 from ztt.template import TemplateFormatError
@@ -183,11 +183,11 @@ def create_layers(
         typer.Option("--overwrite", help="Replace existing generated files."),
     ] = False,
 ) -> None:
-    """Create linked BASE and SYSTEM templates from an existing export."""
+    """Create linked BASE, SYSTEM and BUSINESS templates from an export."""
     try:
         source = load_template(source_file)
         destination = output_dir if output_dir is not None else source.path.parent
-        result = create_base_system_layers(
+        result = create_layered_templates(
             source,
             destination,
             prefix=prefix,
@@ -197,9 +197,12 @@ def create_layers(
         _exit_with_error(exc)
 
     console.print("[bold green]Layered templates created.[/bold green]")
-    console.print(f"BASE   : {result.base_file} ({result.base_template})")
-    console.print(f"SYSTEM : {result.system_file} ({result.system_template})")
+    console.print(f"BASE     : {result.base_file} ({result.base_template})")
+    console.print(f"SYSTEM   : {result.system_file} ({result.system_template})")
+    console.print(f"BUSINESS : {result.business_file} ({result.business_template})")
     console.print(f"LLD rules transferred to SYSTEM: {result.discovery_rules}")
+    console.print(f"Dashboards transferred to BUSINESS: {result.dashboards}")
+    console.print("Import order: BASE, SYSTEM, then BUSINESS.")
     console.print("The source YAML file was not modified.")
 
 
