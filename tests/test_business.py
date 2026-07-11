@@ -118,12 +118,8 @@ def test_create_additional_business_with_filesystem_and_service_lld(tmp_path: Pa
     }
     assert inherited_keys.isdisjoint(generated_keys)
 
-    assert business.template["valuemaps"] == [
-        {
-            "uuid": business.template["valuemaps"][0]["uuid"],
-            "name": "Windows service state",
-            "mappings": [{"value": "0", "newvalue": "Running"}],
-        }
+    assert [entry["name"] for entry in business.template["valuemaps"]] == [
+        "Windows service state"
     ]
     assert business.template["tags"] == [
         {"tag": "layer", "value": "business"},

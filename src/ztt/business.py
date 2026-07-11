@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from ztt.template import TemplateFormatError, ZabbixTemplate
+from ztt.validation import ensure_valid_template
 from ztt.writer import write_document
 
 
@@ -58,32 +59,49 @@ def _rewrite_strings(value: Any, replacements: dict[str, str]) -> None:
             _rewrite_strings(child, replacements)
 
 
-def _collect_valuemap_names(value: Any) -> set[str]:
+def _required_valuemap_names(discovery_rules: list[dict[str, Any]]) -> set[str]:
+    """Return value maps referenced directly by cloned item prototypes."""
+
     names: set[str] = set()
-    if isinstance(value, dict):
-        valuemap = value.get("valuemap")
-        if isinstance(valuemap, dict):
+    for rule in discovery_rules:
+        prototypes = rule.get("item_prototypes", [])
+        if not isinstance(prototypes, list):
+            continue
+        for prototype in prototypes:
+            if not isinstance(prototype, dict):
+                continue
+            valuemap = prototype.get("valuemap")
+            if not isinstance(valuemap, dict):
+                continue
             name = valuemap.get("name")
             if isinstance(name, str) and name:
                 names.add(name)
-        for child in value.values():
-            names.update(_collect_valuemap_names(child))
-    elif isinstance(value, list):
-        for child in value:
-            names.update(_collect_valuemap_names(child))
     return names
 
 
-def _select_valuemaps(valuemaps: Any, names: set[str]) -> list[Any]:
-    if not names:
+def _select_required_valuemaps(
+    source_valuemaps: Any,
+    discovery_rules: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Copy only value maps referenced by the selected BUSINESS prototypes."""
+
+    required_names = _required_valuemap_names(discovery_rules)
+    if not required_names:
         return []
-    if not isinstance(valuemaps, list):
+    if not isinstance(source_valuemaps, list):
         raise TemplateFormatError("'valuemaps' must be a list when present.")
-    return [
-        deepcopy(valuemap)
-        for valuemap in valuemaps
-        if isinstance(valuemap, dict) and valuemap.get("name") in names
-    ]
+
+    available = {
+        entry.get("name"): entry
+        for entry in source_valuemaps
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+    }
+    missing = sorted(required_names - set(available))
+    if missing:
+        raise TemplateFormatError(
+            "Required value map(s) not found in SYSTEM template: " + ", ".join(missing)
+        )
+    return [deepcopy(available[name]) for name in sorted(required_names)]
 
 
 def _normalise_tags(tags: dict[str, str] | None) -> list[dict[str, str]]:
@@ -136,12 +154,8 @@ def _set_business_filter(
 
 
 def _namespace_item_prototype_keys(rule: dict[str, Any], namespace: str) -> None:
-    """Give every cloned item prototype a unique BUSINESS key.
+    """Give every cloned item prototype a unique BUSINESS key."""
 
-    Zabbix identifies inherited item prototypes by key. Keeping a SYSTEM key in a
-    child template makes an import look like an update of the inherited object,
-    where fields such as value_type are read-only.
-    """
     replacements: dict[str, str] = {}
     prototypes = rule.get("item_prototypes", [])
     if not isinstance(prototypes, list):
@@ -154,8 +168,7 @@ def _namespace_item_prototype_keys(rule: dict[str, Any], namespace: str) -> None
         old_key = prototype.get("key")
         if not isinstance(old_key, str) or not old_key:
             continue
-        new_key = old_key if old_key.startswith(prefix) else f"{prefix}{old_key}"
-        replacements[old_key] = new_key
+        replacements[old_key] = old_key if old_key.startswith(prefix) else f"{prefix}{old_key}"
 
     if replacements:
         _rewrite_strings(rule, replacements)
@@ -217,6 +230,7 @@ def create_business_template(
     service_not_matches: str | None = None,
 ) -> BusinessCreationResult:
     """Create one additional BUSINESS template without regenerating BASE/SYSTEM."""
+
     output_dir.mkdir(parents=True, exist_ok=True)
     system_name = str(system.template.get("template", "SYSTEM"))
     visible_name = str(system.template.get("name", system_name))
@@ -256,10 +270,7 @@ def create_business_template(
                 selected.append(clone)
                 service_count += 1
 
-    required_valuemaps = _select_valuemaps(
-        source_valuemaps,
-        _collect_valuemap_names(selected),
-    )
+    required_valuemaps = _select_required_valuemaps(source_valuemaps, selected)
 
     template["template"] = business_technical
     template["name"] = f"{visible_name.removesuffix(' SYSTEM')} {business_name}"
@@ -268,6 +279,7 @@ def create_business_template(
         template.pop(key, None)
     template.pop("macros", None)
     template.pop("tags", None)
+
     if selected:
         template["discovery_rules"] = selected
     else:
@@ -291,7 +303,11 @@ def create_business_template(
     export.pop("graphs", None)
     _rewrite_strings(document, {f"/{system_name}/": f"/{business_technical}/"})
     _regenerate_uuids(document)
+
+    generated = ZabbixTemplate.from_document(business_file, document)
+    ensure_valid_template(generated)
     write_document(business_file, document)
+
     return BusinessCreationResult(
         file=business_file,
         template=business_technical,
