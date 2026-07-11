@@ -152,14 +152,16 @@ def create_base_system_layers(
     system_export.pop("triggers", None)
     system_export.pop("graphs", None)
 
-    _rewrite_template_references(base_document, original_technical, base_technical)
-    _rewrite_template_references(system_document, original_technical, system_technical)
+    # Dashboard references must be classified before the generic SYSTEM rewrite,
+    # otherwise every widget would incorrectly point to SYSTEM.
     _rewrite_dashboard_references(
         dashboards,
         original_technical,
         base_technical,
         system_technical,
     )
+    _rewrite_template_references(base_document, original_technical, base_technical)
+    _rewrite_template_references(system_document, original_technical, system_technical)
 
     _regenerate_uuids(base_document)
     _regenerate_uuids(system_document)
