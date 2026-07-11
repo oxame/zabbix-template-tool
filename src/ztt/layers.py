@@ -63,34 +63,6 @@ def _rewrite_template_references(value: Any, old: str, new: str) -> None:
             _rewrite_template_references(child, old, new)
 
 
-def _rewrite_dashboard_references(
-    dashboards: list[Any],
-    original: str,
-    base_template: str,
-    system_template: str,
-) -> None:
-    """Point dashboard widgets to the layer that owns the referenced object."""
-    for dashboard in dashboards:
-        if not isinstance(dashboard, dict):
-            continue
-        for page in dashboard.get("pages", []):
-            if not isinstance(page, dict):
-                continue
-            for widget in page.get("widgets", []):
-                if not isinstance(widget, dict):
-                    continue
-                for field in widget.get("fields", []):
-                    if not isinstance(field, dict):
-                        continue
-                    reference = field.get("value")
-                    if not isinstance(reference, dict) or reference.get("host") != original:
-                        continue
-                    if field.get("type") == "GRAPH_PROTOTYPE":
-                        reference["host"] = system_template
-                    else:
-                        reference["host"] = base_template
-
-
 def _collect_valuemap_names(value: Any) -> set[str]:
     """Collect value-map names referenced anywhere in a discovery-rule subtree."""
     names: set[str] = set()
@@ -137,8 +109,10 @@ def create_layered_templates(
 
     BASE owns collection items, macros, value maps, standalone triggers and
     graphs. SYSTEM owns LLD rules and the value maps required by prototypes.
-    BUSINESS owns dashboards and links to SYSTEM. Every generated template gets
-    independent UUIDs and the source file is never modified.
+    BUSINESS currently contains only the link to SYSTEM. Dashboards are counted
+    but deliberately skipped until their cross-template references can be
+    validated reliably. Every generated template gets independent UUIDs and the
+    source file is never modified.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -204,10 +178,6 @@ def create_layered_templates(
     business_template["template"] = business_technical
     business_template["name"] = business_visible
     business_template["templates"] = [{"name": system_technical}]
-    if dashboards:
-        business_template["dashboards"] = dashboards
-    else:
-        business_template.pop("dashboards", None)
     _remove_template_objects(
         business_template,
         (
@@ -217,28 +187,16 @@ def create_layered_templates(
             "graphs",
             "macros",
             "valuemaps",
+            "dashboards",
         ),
     )
 
-    # Export-level triggers and graphs reference standalone BASE items.
     for export in (system_export, business_export):
         export.pop("triggers", None)
         export.pop("graphs", None)
 
-    # Classify dashboard references before the generic BUSINESS rewrite.
-    _rewrite_dashboard_references(
-        dashboards,
-        original_technical,
-        base_technical,
-        system_technical,
-    )
     _rewrite_template_references(base_document, original_technical, base_technical)
     _rewrite_template_references(system_document, original_technical, system_technical)
-    _rewrite_template_references(
-        business_document,
-        original_technical,
-        business_technical,
-    )
 
     _regenerate_uuids(base_document)
     _regenerate_uuids(system_document)
