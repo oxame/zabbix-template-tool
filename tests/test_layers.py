@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any
 
-from ztt.layers import create_base_system_layers
+from ztt.layers import create_layered_templates
 from ztt.loader import load_template
 
 
@@ -22,9 +22,9 @@ def _collect_uuids(value: Any) -> set[str]:
     return uuids
 
 
-def test_create_base_and_system_layers(tmp_path: Path) -> None:
+def test_create_three_linked_layers(tmp_path: Path) -> None:
     source = load_template(SAMPLE)
-    result = create_base_system_layers(
+    result = create_layered_templates(
         source,
         tmp_path,
         prefix="TEMPLATE_TEST",
@@ -32,10 +32,12 @@ def test_create_base_and_system_layers(tmp_path: Path) -> None:
 
     assert result.base_file.exists()
     assert result.system_file.exists()
+    assert result.business_file.exists()
     assert result.discovery_rules == 1
 
     base = load_template(result.base_file)
     system = load_template(result.system_file)
+    business = load_template(result.business_file)
 
     assert base.template["template"] == "TEMPLATE_TEST_BASE"
     assert "discovery_rules" not in base.template
@@ -44,14 +46,24 @@ def test_create_base_and_system_layers(tmp_path: Path) -> None:
     assert system.template["template"] == "TEMPLATE_TEST_SYSTEM"
     assert len(system.template["discovery_rules"]) == 1
     assert "items" not in system.template
+    assert "dashboards" not in system.template
     assert system.template["templates"] == [{"name": "TEMPLATE_TEST_BASE"}]
+
+    assert business.template["template"] == "TEMPLATE_TEST_BUSINESS"
+    assert "items" not in business.template
+    assert "discovery_rules" not in business.template
+    assert business.template["templates"] == [{"name": "TEMPLATE_TEST_SYSTEM"}]
 
     source_uuids = _collect_uuids(source.document)
     base_uuids = _collect_uuids(base.document)
     system_uuids = _collect_uuids(system.document)
+    business_uuids = _collect_uuids(business.document)
     assert source_uuids.isdisjoint(base_uuids)
     assert source_uuids.isdisjoint(system_uuids)
+    assert source_uuids.isdisjoint(business_uuids)
     assert base_uuids.isdisjoint(system_uuids)
+    assert base_uuids.isdisjoint(business_uuids)
+    assert system_uuids.isdisjoint(business_uuids)
 
 
 def test_rewrite_references_and_copy_required_valuemaps(tmp_path: Path) -> None:
@@ -127,13 +139,14 @@ def test_rewrite_references_and_copy_required_valuemaps(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    result = create_base_system_layers(
+    result = create_layered_templates(
         load_template(source_file),
         tmp_path / "out",
         prefix="LAYERED",
     )
     base = load_template(result.base_file)
     system = load_template(result.system_file)
+    business = load_template(result.business_file)
 
     assert "dashboards" not in base.template
     assert "triggers" in base.document["zabbix_export"]
@@ -148,12 +161,14 @@ def test_rewrite_references_and_copy_required_valuemaps(tmp_path: Path) -> None:
 
     assert "triggers" not in system.document["zabbix_export"]
     assert "graphs" not in system.document["zabbix_export"]
+    assert "dashboards" not in system.template
     assert [valuemap["name"] for valuemap in system.template["valuemaps"]] == ["Test map"]
     assert "/LAYERED_SYSTEM/prototype.key" in system.template["discovery_rules"][0][
         "trigger_prototypes"
     ][0]["expression"]
 
-    widgets = system.template["dashboards"][0]["pages"][0]["widgets"]
+    assert business.template["templates"] == [{"name": "LAYERED_SYSTEM"}]
+    widgets = business.template["dashboards"][0]["pages"][0]["widgets"]
     prototype_host = widgets[0]["fields"][0]["value"]["host"]
     item_host = widgets[1]["fields"][0]["value"]["host"]
     assert prototype_host == "LAYERED_SYSTEM"
@@ -162,10 +177,10 @@ def test_rewrite_references_and_copy_required_valuemaps(tmp_path: Path) -> None:
 
 def test_refuse_existing_outputs(tmp_path: Path) -> None:
     source = load_template(SAMPLE)
-    create_base_system_layers(source, tmp_path, prefix="TEMPLATE_TEST")
+    create_layered_templates(source, tmp_path, prefix="TEMPLATE_TEST")
 
     try:
-        create_base_system_layers(source, tmp_path, prefix="TEMPLATE_TEST")
+        create_layered_templates(source, tmp_path, prefix="TEMPLATE_TEST")
     except FileExistsError:
         pass
     else:
