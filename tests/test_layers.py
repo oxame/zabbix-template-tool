@@ -54,7 +54,7 @@ def test_create_base_and_system_layers(tmp_path: Path) -> None:
     assert base_uuids.isdisjoint(system_uuids)
 
 
-def test_rewrite_references_and_move_dashboards(tmp_path: Path) -> None:
+def test_rewrite_references_and_copy_required_valuemaps(tmp_path: Path) -> None:
     source_file = tmp_path / "source.yaml"
     source_file.write_text(
         """zabbix_export:
@@ -73,6 +73,12 @@ def test_rewrite_references_and_move_dashboards(tmp_path: Path) -> None:
         - uuid: 33333333333333333333333333333333
           name: LLD
           key: discovery.key
+          item_prototypes:
+            - uuid: 99999999999999999999999999999999
+              name: Prototype item
+              key: prototype.key[{#ID}]
+              valuemap:
+                name: Test map
           trigger_prototypes:
             - uuid: 44444444444444444444444444444444
               name: Prototype trigger
@@ -83,6 +89,9 @@ def test_rewrite_references_and_move_dashboards(tmp_path: Path) -> None:
       valuemaps:
         - uuid: 55555555555555555555555555555555
           name: Test map
+          mappings: []
+        - uuid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          name: Unused map
           mappings: []
       dashboards:
         - uuid: 66666666666666666666666666666666
@@ -139,7 +148,7 @@ def test_rewrite_references_and_move_dashboards(tmp_path: Path) -> None:
 
     assert "triggers" not in system.document["zabbix_export"]
     assert "graphs" not in system.document["zabbix_export"]
-    assert "valuemaps" not in system.template
+    assert [valuemap["name"] for valuemap in system.template["valuemaps"]] == ["Test map"]
     assert "/LAYERED_SYSTEM/prototype.key" in system.template["discovery_rules"][0][
         "trigger_prototypes"
     ][0]["expression"]
