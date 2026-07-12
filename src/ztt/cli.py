@@ -13,6 +13,7 @@ from ztt.dependencies import analyze_lld_dependencies
 from ztt.layers import create_layered_templates
 from ztt.lld import list_discovery_rules, move_discovery_rules
 from ztt.loader import load_template
+from ztt.merge import merge_templates
 from ztt.template import TemplateFormatError
 
 app = typer.Typer(name="ztt", help="Inspect and refactor Zabbix YAML templates.", no_args_is_help=True)
@@ -233,6 +234,50 @@ def create_business(
         console.print(
             f"[yellow]Service LLD skipped (no master item): {result.skipped_service_rules}[/yellow]"
         )
+
+
+@app.command("merge")
+def merge(
+    source_files: Annotated[list[Path], typer.Argument(help="Two or more Zabbix YAML templates.")],
+    output: Annotated[Path, typer.Option("--output", "-o", help="Merged YAML output file.")],
+    conflict: Annotated[str, typer.Option("--conflict", help="error, keep-first or keep-last")] = "error",
+    template_name: Annotated[str | None, typer.Option("--template-name")] = None,
+    apply: Annotated[bool, typer.Option("--apply", help="Write the merged file.")] = False,
+    overwrite: Annotated[bool, typer.Option("--overwrite")] = False,
+) -> None:
+    """Merge objects from several templates. Dry-run unless --apply is used."""
+    try:
+        result = merge_templates(
+            [load_template(path) for path in source_files],
+            output,
+            conflict_mode=conflict,  # type: ignore[arg-type]
+            apply=apply,
+            overwrite=overwrite,
+            template_name=template_name,
+        )
+    except (FileNotFoundError, FileExistsError, PermissionError, TemplateFormatError, ValueError) as exc:
+        _exit_with_error(exc)
+
+    mode = "Simulation" if result.dry_run else "Applied"
+    console.print(f"[bold]{mode}:[/bold] {result.source_count} templates")
+    table = Table(title="Merged objects")
+    table.add_column("Section")
+    table.add_column("Added", justify="right")
+    for section, count in result.added.items():
+        table.add_row(section, str(count))
+    console.print(table)
+    if result.conflicts:
+        conflict_table = Table(title="Conflicts")
+        conflict_table.add_column("Section")
+        conflict_table.add_column("Identity")
+        conflict_table.add_column("Source")
+        for item in result.conflicts:
+            conflict_table.add_row(item.section, item.identity, str(item.source))
+        console.print(conflict_table)
+    if result.dry_run:
+        console.print("[yellow]No file created. Add --apply to write the merge result.[/yellow]")
+    else:
+        console.print(f"[bold green]Merged template created:[/bold green] {result.output_file}")
 
 
 @app.command("move-lld")
