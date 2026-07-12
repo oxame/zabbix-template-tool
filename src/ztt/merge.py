@@ -73,6 +73,28 @@ def _regenerate_uuids(value: Any) -> None:
             _regenerate_uuids(child)
 
 
+def _rewrite_template_references(value: Any, source_name: str, target_name: str) -> None:
+    """Rewrite object references that must point to the merged template.
+
+    Zabbix graph prototypes store the owning template in an exact ``host`` field,
+    while trigger expressions use ``/TEMPLATE/key`` paths. Linked parent
+    templates are intentionally left unchanged.
+    """
+    if source_name == target_name:
+        return
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key == "host" and child == source_name:
+                value[key] = target_name
+            elif isinstance(child, str):
+                value[key] = child.replace(f"/{source_name}/", f"/{target_name}/")
+            else:
+                _rewrite_template_references(child, source_name, target_name)
+    elif isinstance(value, list):
+        for child in value:
+            _rewrite_template_references(child, source_name, target_name)
+
+
 def merge_templates(
     sources: list[ZabbixTemplate],
     output_file: Path,
@@ -92,9 +114,12 @@ def merge_templates(
 
     document = deepcopy(sources[0].document)
     target = document["zabbix_export"]["templates"][0]
+    first_source_name = str(sources[0].template.get("template", ""))
+    target_name = template_name or first_source_name
     if template_name:
         target["template"] = template_name
         target["name"] = template_name
+    _rewrite_template_references(document, first_source_name, target_name)
 
     indexes: dict[str, dict[str, int]] = {}
     added = {section: 0 for section in _SECTIONS}
@@ -114,6 +139,7 @@ def merge_templates(
         }
 
     for source in sources[1:]:
+        source_name = str(source.template.get("template", ""))
         for section in _SECTIONS:
             objects = source.template.get(section, [])
             if objects is None:
@@ -132,11 +158,13 @@ def merge_templates(
                     if conflict_mode == "keep-first":
                         continue
                     replacement = deepcopy(obj)
+                    _rewrite_template_references(replacement, source_name, target_name)
                     _regenerate_uuids(replacement)
                     target[section][current_index] = replacement
                     continue
 
                 clone = deepcopy(obj)
+                _rewrite_template_references(clone, source_name, target_name)
                 _regenerate_uuids(clone)
                 indexes[section][identity] = len(target[section])
                 target[section].append(clone)
