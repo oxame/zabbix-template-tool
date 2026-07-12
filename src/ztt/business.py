@@ -59,6 +59,26 @@ def _rewrite_strings(value: Any, replacements: dict[str, str]) -> None:
             _rewrite_strings(child, replacements)
 
 
+def _rewrite_template_hosts(value: Any, old_host: str, new_host: str) -> None:
+    """Rewrite explicit Zabbix object host references.
+
+    Trigger expressions contain the template name between slashes and are handled
+    by ``_rewrite_strings``. Graph prototypes instead store the template name in
+    a dedicated ``host`` field, which must point to the BUSINESS template that
+    owns the namespaced item prototypes.
+    """
+
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key == "host" and child == old_host:
+                value[key] = new_host
+            else:
+                _rewrite_template_hosts(child, old_host, new_host)
+    elif isinstance(value, list):
+        for child in value:
+            _rewrite_template_hosts(child, old_host, new_host)
+
+
 def _required_valuemap_names(discovery_rules: list[dict[str, Any]]) -> set[str]:
     """Return value maps referenced directly by cloned item prototypes."""
 
@@ -302,6 +322,7 @@ def create_business_template(
     export.pop("triggers", None)
     export.pop("graphs", None)
     _rewrite_strings(document, {f"/{system_name}/": f"/{business_technical}/"})
+    _rewrite_template_hosts(document, system_name, business_technical)
     _regenerate_uuids(document)
 
     generated = ZabbixTemplate.from_document(business_file, document)
