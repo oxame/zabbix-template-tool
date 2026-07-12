@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zabbix-template-tool"
-version = "0.2.0.dev0"
+version = "0.7.0"
 description = "CLI toolkit to inspect and refactor Zabbix YAML templates"
 readme = "README.md"
 requires-python = ">=3.11"
