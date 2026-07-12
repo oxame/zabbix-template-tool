@@ -1,0 +1,19 @@
+# Copy this file to ~/.config/ztt/config.yaml or set ZTT_CONFIG.
+# Tokens are never stored here: define the referenced environment variables.
+profiles:
+  qual:
+    url: https://zabbix-qual.example/zabbix
+    token_env: ZTT_ZABBIX_QUAL_TOKEN
+    production: false
+    verify_tls: true
+    timeout: 30
+
+  prod:
+    url: https://zabbix-prod.example/zabbix
+    token_env: ZTT_ZABBIX_PROD_TOKEN
+    production: true
+    verify_tls: true
+    timeout: 30
+
+    # Optional internal PKI certificate bundle:
+    # ca_file: /etc/pki/ca-trust/source/anchors/company-ca.pem
