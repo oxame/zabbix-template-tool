@@ -114,5 +114,5 @@ def get_profile(name: str, path: Path | None = None) -> ZabbixProfile:
     try:
         return profiles[key]
     except KeyError as exc:
-        available = ", ".join(sorted(profiles))
+        available = ", ".join(profiles)
         raise ProfileError(f"Unknown profile '{name}'. Available profiles: {available}") from exc
