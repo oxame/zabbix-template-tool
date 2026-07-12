@@ -5,7 +5,7 @@
 The project is designed around layered templates:
 
 ```text
-BASE (collection) -> SYSTEM (system LLD and triggers) -> BUSINESS (dashboards and business objects)
+BASE (collection) -> SYSTEM (system LLD and triggers) -> BUSINESS (business LLD and triggers)
 ```
 
 ## Current capabilities
@@ -14,8 +14,14 @@ BASE (collection) -> SYSTEM (system LLD and triggers) -> BUSINESS (dashboards an
 - Display template metadata and object counts.
 - List and analyze LLD rules.
 - Automatically create linked BASE, SYSTEM and BUSINESS templates.
+- Create additional BUSINESS templates from an existing SYSTEM template without regenerating BASE or SYSTEM.
+- Clone Filesystem and Windows Services LLD rules into BUSINESS.
+- Apply BUSINESS filters through macros.
+- Namespace BUSINESS discovery keys and item prototype keys.
+- Rewrite graph prototype references to the generated BUSINESS template.
+- Copy value maps required by cloned prototypes.
+- Add template tags to SYSTEM and BUSINESS.
 - Move selected LLD rules between existing templates.
-- Preserve complete LLD blocks, including preprocessing, filters, prototypes and overrides.
 - Preserve YAML ordering and quotes through `ruamel.yaml`.
 
 ## Requirements
@@ -61,22 +67,41 @@ For development:
 pip install -e ".[dev]"
 ```
 
-## Create BASE, SYSTEM and BUSINESS automatically
+## Update an existing installation
+
+```bash
+cd zabbix-template-tool
+git pull
+source .venv/bin/activate
+pip install --upgrade .
+```
+
+## Create BASE, SYSTEM and the first BUSINESS template
 
 Starting from an existing Zabbix YAML export:
 
 ```bash
-ztt create-layers template-existing.yaml
+ztt create-layers template-existing.yaml --interactive
 ```
 
-The source file is not modified. By default, ZTT creates the three generated templates in the same directory as the source file.
+The interactive mode asks for:
+
+- the BUSINESS template name, for example `BDD`, `Oracle`, `SQL` or `Liaison`;
+- whether to add the Filesystem BUSINESS LLD;
+- Filesystem match and exclusion macros;
+- whether to add the Windows Services BUSINESS LLD;
+- Services match and exclusion macros;
+- SYSTEM tags;
+- BUSINESS tags.
+
+The source file is not modified. By default, ZTT creates the generated templates in the same directory as the source file.
 
 ```text
 /templates/
 ├── template-existing.yaml
 ├── TEMPLATE_NAME_BASE.yaml
 ├── TEMPLATE_NAME_SYSTEM.yaml
-└── TEMPLATE_NAME_BUSINESS.yaml
+└── TEMPLATE_NAME_BDD.yaml
 ```
 
 The generated layers contain:
@@ -84,13 +109,14 @@ The generated layers contain:
 ```text
 BASE
 ├── collection items
+├── shared master items
 ├── macros
 ├── value maps
 ├── standalone triggers
 └── standalone graphs
 
 SYSTEM -> BASE
-├── LLD rules
+├── system LLD rules
 ├── item prototypes
 ├── trigger prototypes
 ├── graph prototypes
@@ -98,54 +124,209 @@ SYSTEM -> BASE
 └── value maps required by prototypes
 
 BUSINESS -> SYSTEM
-└── dashboards
+├── selected Filesystem LLD
+├── selected Windows Services LLD
+├── namespaced item prototype keys
+├── business macros
+├── business tags
+└── value maps required by cloned prototypes
 ```
 
-Dashboard widget references are rewritten to point to the layer that owns the referenced object:
+### BUSINESS macros
 
-- item and graph widgets point to BASE;
-- graph prototype widgets point to SYSTEM.
+Filesystem discovery uses:
+
+```text
+{$BUSINESS.FS.MATCHES}
+{$BUSINESS.FS.NOT_MATCHES}
+```
+
+Windows Services discovery uses:
+
+```text
+{$BUSINESS.SERVICE.MATCHES}
+{$BUSINESS.SERVICE.NOT_MATCHES}
+```
+
+Example values:
+
+```text
+{$BUSINESS.FS.MATCHES}       = ^(D:|E:)$
+{$BUSINESS.FS.NOT_MATCHES}   = ^C:$
+{$BUSINESS.SERVICE.MATCHES}  = ^(MSSQL|SQLAgent).*
+{$BUSINESS.SERVICE.NOT_MATCHES} = ^$
+```
+
+### Generated BUSINESS keys
+
+The BUSINESS name is normalized and included in the generated keys.
+
+For a BUSINESS named `SQL`:
+
+```text
+ztt.business.sql.fs.discovery
+ztt.business.sql.service.discovery
+ztt.business.sql.vfs.fs.dependent.size[{#FSNAME},pused]
+ztt.business.sql.service.info[{#SERVICE.NAME},state]
+```
+
+This prevents collisions with inherited SYSTEM prototypes.
+
+### Output directory
 
 Choose another output directory with `--output-dir` or `-o`:
 
 ```bash
-ztt create-layers template-existing.yaml --output-dir generated
+ztt create-layers template-existing.yaml \
+  --interactive \
+  --output-dir generated
 ```
 
-Choose the technical-name prefix:
+### Technical-name prefix
 
 ```bash
 ztt create-layers template-existing.yaml \
+  --interactive \
   --output-dir generated \
-  --prefix TEMPLATE_LINUX
+  --prefix TEMPLATE_WINDOWS
 ```
 
-This produces:
+### Overwrite generated files
 
-```text
-generated/TEMPLATE_LINUX_BASE.yaml
-generated/TEMPLATE_LINUX_SYSTEM.yaml
-generated/TEMPLATE_LINUX_BUSINESS.yaml
-```
-
-ZTT refuses to overwrite existing files by default. To replace previously generated files:
+ZTT refuses to overwrite existing files by default.
 
 ```bash
 ztt create-layers template-existing.yaml \
-  --prefix TEMPLATE_LINUX \
+  --interactive \
   --overwrite
 ```
 
-Before importing, inspect the generated templates:
+## Create an additional BUSINESS template
+
+Use `create-business` when BASE and SYSTEM already exist and you want to create another BUSINESS template without regenerating them.
+
+The source file must be the SYSTEM YAML generated by ZTT.
 
 ```bash
-ztt info TEMPLATE_LINUX_BASE.yaml
-ztt info TEMPLATE_LINUX_SYSTEM.yaml
-ztt analyze TEMPLATE_LINUX_SYSTEM.yaml
-ztt info TEMPLATE_LINUX_BUSINESS.yaml
+ztt create-business TEMPLATE_NAME_SYSTEM.yaml --interactive
 ```
 
-Import the templates in this order:
+Example:
+
+```bash
+ztt create-business \
+  EFS_-_Windows_by_Zabbix_agent_SYSTEM.yaml \
+  --interactive
+```
+
+The interactive assistant asks for the new BUSINESS name and its Filesystem, Services, macros and tags.
+
+Example successive generations:
+
+```bash
+ztt create-business EFS_-_Windows_by_Zabbix_agent_SYSTEM.yaml --interactive
+# BUSINESS name: Oracle
+
+ztt create-business EFS_-_Windows_by_Zabbix_agent_SYSTEM.yaml --interactive
+# BUSINESS name: SQL
+
+ztt create-business EFS_-_Windows_by_Zabbix_agent_SYSTEM.yaml --interactive
+# BUSINESS name: Liaison
+```
+
+Result:
+
+```text
+EFS_-_Windows_by_Zabbix_agent_BASE.yaml
+EFS_-_Windows_by_Zabbix_agent_SYSTEM.yaml
+EFS_-_Windows_by_Zabbix_agent_Oracle.yaml
+EFS_-_Windows_by_Zabbix_agent_SQL.yaml
+EFS_-_Windows_by_Zabbix_agent_Liaison.yaml
+```
+
+BASE and SYSTEM are not modified by `create-business`.
+
+To overwrite an existing BUSINESS file:
+
+```bash
+ztt create-business \
+  EFS_-_Windows_by_Zabbix_agent_SYSTEM.yaml \
+  --interactive \
+  --overwrite
+```
+
+### Expected generation summary
+
+When both LLD types are selected, the output should include:
+
+```text
+Filesystem LLD cloned: 1
+Service LLD cloned: 1
+Service LLD skipped (no master item): 0
+```
+
+If the Services LLD is skipped because no master item exists, verify that the input file is the generated SYSTEM template and not the original Zabbix export.
+
+## Verify generated templates before import
+
+Inspect the technical template names:
+
+```bash
+ztt info TEMPLATE_NAME_BASE.yaml
+ztt info TEMPLATE_NAME_SYSTEM.yaml
+ztt info TEMPLATE_NAME_SQL.yaml
+```
+
+List cloned LLD rules:
+
+```bash
+ztt list-lld TEMPLATE_NAME_SQL.yaml
+```
+
+Analyze dependencies:
+
+```bash
+ztt analyze TEMPLATE_NAME_SQL.yaml
+```
+
+Check the SYSTEM inheritance link:
+
+```bash
+grep -n -A2 "templates:" TEMPLATE_NAME_SQL.yaml
+```
+
+Expected result:
+
+```yaml
+templates:
+  - name: TEMPLATE_NAME_SYSTEM
+```
+
+Check copied value maps:
+
+```bash
+grep -n -A20 "valuemaps:" TEMPLATE_NAME_SQL.yaml
+```
+
+For a Windows Services BUSINESS LLD, the file should contain the required value map, for example:
+
+```yaml
+valuemaps:
+  - uuid: ...
+    name: Windows service state
+```
+
+Check graph prototype host references:
+
+```bash
+grep -n "host:" TEMPLATE_NAME_SQL.yaml | sort -u
+```
+
+References using `ztt.business.sql...` keys must point to the BUSINESS template, not to SYSTEM.
+
+## Import order in Zabbix
+
+For the first generation, import templates in this order:
 
 ```text
 1. BASE
@@ -154,6 +335,30 @@ Import the templates in this order:
 ```
 
 SYSTEM already contains the link to BASE. BUSINESS already contains the link to SYSTEM.
+
+For an additional BUSINESS generated with `create-business`, BASE and SYSTEM are already present, so import only the new BUSINESS YAML.
+
+## Non-interactive examples
+
+Create the initial layers with a named BUSINESS:
+
+```bash
+ztt create-layers template-existing.yaml \
+  --business-name SQL \
+  --no-interactive
+```
+
+Create an additional BUSINESS with both LLD types:
+
+```bash
+ztt create-business TEMPLATE_NAME_SYSTEM.yaml \
+  --business-name SQL \
+  --filesystems \
+  --services \
+  --no-interactive
+```
+
+In non-interactive mode, enabled BUSINESS filters use the default regular expression `.*`.
 
 ## Other commands
 
@@ -203,19 +408,27 @@ By default, `move-lld` creates `.bak` copies before modifying files.
 ztt info template-existing.yaml
 ztt list-lld template-existing.yaml
 ztt analyze template-existing.yaml
-ztt create-layers template-existing.yaml --prefix TEMPLATE_LINUX
-ztt info TEMPLATE_LINUX_BASE.yaml
-ztt analyze TEMPLATE_LINUX_SYSTEM.yaml
-ztt info TEMPLATE_LINUX_BUSINESS.yaml
+
+ztt create-layers template-existing.yaml --interactive
+
+ztt info TEMPLATE_NAME_BASE.yaml
+ztt info TEMPLATE_NAME_SYSTEM.yaml
+ztt info TEMPLATE_NAME_BUSINESS.yaml
+ztt analyze TEMPLATE_NAME_BUSINESS.yaml
+
+ztt create-business TEMPLATE_NAME_SYSTEM.yaml --interactive
+ztt info TEMPLATE_NAME_SECOND_BUSINESS.yaml
+ztt analyze TEMPLATE_NAME_SECOND_BUSINESS.yaml
 ```
 
-Keep the original export in Git and test the generated files in a qualification environment before importing them into production.
+Keep the original export in Git and test generated files in a qualification environment before importing them into production.
 
 ## Current limitations
 
-External dependencies used by LLD rules are detected by `ztt analyze`. Value maps used by prototypes are copied automatically to SYSTEM, while broader automatic dependency transfer remains under development.
-
-The BUSINESS layer currently contains exported template dashboards. Classification of business triggers, services and SLA objects will be added progressively.
+- BUSINESS generation is currently focused on Filesystem and Windows Services LLD rules.
+- Template dashboards are skipped temporarily because dashboard widgets can contain internal numeric references that are not portable between generated templates.
+- Broader automatic transfer of external dependencies remains under development.
+- The source passed to `create-business` must be a SYSTEM template previously generated by ZTT.
 
 ## Tests
 
@@ -226,7 +439,7 @@ ruff check .
 
 ## Roadmap
 
-The detailed project roadmap covers dependency management, full BASE/SYSTEM/BUSINESS generation, project mode, Git integration, Zabbix API exports, intelligent diff, documentation, CI/CD and the future graphical interface.
+The detailed project roadmap covers dependency management, project mode, Git integration, Zabbix API exports, intelligent diff, documentation, CI/CD and a future graphical interface.
 
 See [ROADMAP.md](ROADMAP.md).
 
