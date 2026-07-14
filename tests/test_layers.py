@@ -144,17 +144,17 @@ def test_rewrite_references_copy_valuemaps_and_skip_dashboards(tmp_path: Path) -
 
     assert result.dashboards == 1
     assert "dashboards" not in base.template
-    assert "triggers" in base.document["zabbix_export"]
+    assert "triggers" not in base.document["zabbix_export"]
     assert "graphs" in base.document["zabbix_export"]
-    assert "/LAYERED_BASE/base.key" in base.document["zabbix_export"]["triggers"][0][
-        "expression"
-    ]
     assert (
         base.document["zabbix_export"]["graphs"][0]["graph_items"][0]["item"]["host"]
         == "LAYERED_BASE"
     )
 
-    assert "triggers" not in system.document["zabbix_export"]
+    assert "triggers" in system.document["zabbix_export"]
+    assert "/LAYERED_SYSTEM/base.key" in system.document["zabbix_export"]["triggers"][0][
+        "expression"
+    ]
     assert "graphs" not in system.document["zabbix_export"]
     assert "dashboards" not in system.template
     assert [valuemap["name"] for valuemap in system.template["valuemaps"]] == ["Test map"]

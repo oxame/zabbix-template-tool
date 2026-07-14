@@ -175,6 +175,34 @@ def _prepare_shared_services(
     return masters, prepared
 
 
+def _extract_item_triggers(items: Any) -> list[dict[str, Any]]:
+    """Remove item-embedded triggers and return them as top-level trigger objects."""
+
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        raise TemplateFormatError("'items' must be a list when present.")
+
+    extracted: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        triggers = item.pop("triggers", [])
+        if not isinstance(triggers, list):
+            raise TemplateFormatError("'items[].triggers' must be a list when present.")
+        extracted.extend(deepcopy(trigger) for trigger in triggers if isinstance(trigger, dict))
+    return extracted
+
+
+def _pop_export_triggers(export: dict[str, Any]) -> list[dict[str, Any]]:
+    """Remove top-level export triggers and return validated trigger objects."""
+
+    triggers = export.pop("triggers", [])
+    if not isinstance(triggers, list):
+        raise TemplateFormatError("'zabbix_export.triggers' must be a list when present.")
+    return [deepcopy(trigger) for trigger in triggers if isinstance(trigger, dict)]
+
+
 def create_layered_templates(
     source: ZabbixTemplate,
     output_dir: Path,
@@ -230,6 +258,10 @@ def create_layered_templates(
     if service_masters:
         base_template.setdefault("items", []).extend(service_masters)
 
+    embedded_triggers = _extract_item_triggers(base_template.get("items", []))
+    top_level_triggers = _pop_export_triggers(base_export)
+    system_triggers = top_level_triggers + embedded_triggers
+
     dashboards = base_template.pop("dashboards", [])
     if not isinstance(dashboards, list):
         raise TemplateFormatError("'dashboards' must be a list when present.")
@@ -257,6 +289,10 @@ def create_layered_templates(
     else:
         system_template.pop("valuemaps", None)
     _remove_template_objects(system_template, ("items", "triggers", "graphs", "macros", "dashboards"))
+    if system_triggers:
+        system_export["triggers"] = system_triggers
+    else:
+        system_export.pop("triggers", None)
 
     business_template["template"] = business_technical
     business_template["name"] = business_visible
@@ -298,9 +334,9 @@ def create_layered_templates(
     if required_business_valuemaps:
         business_template["valuemaps"] = required_business_valuemaps
 
-    for export in (system_export, business_export):
-        export.pop("triggers", None)
-        export.pop("graphs", None)
+    business_export.pop("triggers", None)
+    system_export.pop("graphs", None)
+    business_export.pop("graphs", None)
 
     _rewrite_template_references(base_document, original_technical, base_technical)
     _rewrite_template_references(system_document, original_technical, system_technical)
