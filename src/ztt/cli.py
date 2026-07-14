@@ -14,9 +14,14 @@ from ztt.layers import create_layered_templates
 from ztt.lld import list_discovery_rules, move_discovery_rules
 from ztt.loader import load_template
 from ztt.merge import merge_templates
+from ztt.naming import rename_business_template, rename_layered_templates
 from ztt.template import TemplateFormatError
 
-app = typer.Typer(name="ztt", help="Inspect and refactor Zabbix YAML templates.", no_args_is_help=True)
+app = typer.Typer(
+    name="ztt",
+    help="Inspect and refactor Zabbix YAML templates.",
+    no_args_is_help=True,
+)
 console = Console()
 
 
@@ -100,8 +105,13 @@ def list_lld(
         table.add_column(column)
     for rule in rules:
         table.add_row(
-            str(rule.index), rule.name, rule.key, str(rule.item_prototypes),
-            str(rule.trigger_prototypes), str(rule.graph_prototypes), str(rule.overrides),
+            str(rule.index),
+            rule.name,
+            rule.key,
+            str(rule.item_prototypes),
+            str(rule.trigger_prototypes),
+            str(rule.graph_prototypes),
+            str(rule.overrides),
         )
     console.print(table)
     if not rules:
@@ -139,7 +149,14 @@ def create_layers(
     source_file: Annotated[Path, typer.Argument(exists=False, dir_okay=False, readable=True)],
     output_dir: Annotated[Path | None, typer.Option("--output-dir", "-o")] = None,
     prefix: Annotated[str | None, typer.Option("--prefix")] = None,
+    template_name: Annotated[str | None, typer.Option("--template-name")] = None,
+    base_name: Annotated[str | None, typer.Option("--base-name")] = None,
+    system_name: Annotated[str | None, typer.Option("--system-name")] = None,
     business_name: Annotated[str | None, typer.Option("--business-name")] = None,
+    business_template_name: Annotated[
+        str | None,
+        typer.Option("--business-template-name"),
+    ] = None,
     interactive: Annotated[bool, typer.Option("--interactive/--no-interactive")] = False,
     overwrite: Annotated[bool, typer.Option("--overwrite")] = False,
 ) -> None:
@@ -150,8 +167,27 @@ def create_layers(
         fs_matches = fs_not_matches = service_matches = service_not_matches = None
         system_tags = {"layer": "system"}
         business_tags = {"layer": "business"}
+        original_name = str(source.template.get("name", source.template.get("template", "TEMPLATE")))
+        root_name = template_name or original_name
+
         if interactive:
-            business_name = typer.prompt("Nom du template BUSINESS", default=business_name or "BUSINESS")
+            root_name = typer.prompt("Nom racine des nouveaux templates", default=root_name)
+            business_name = typer.prompt(
+                "Libellé de la couche BUSINESS",
+                default=business_name or "BUSINESS",
+            )
+            base_name = typer.prompt(
+                "Nom complet du template BASE",
+                default=base_name or f"{root_name} BASE",
+            )
+            system_name = typer.prompt(
+                "Nom complet du template SYSTEM",
+                default=system_name or f"{root_name} SYSTEM",
+            )
+            business_template_name = typer.prompt(
+                "Nom complet du template BUSINESS",
+                default=business_template_name or f"{root_name} {business_name}",
+            )
             if typer.confirm("Renseigner les macros Filesystem métier ?", default=False):
                 fs_matches = typer.prompt("{$BUSINESS.FS.MATCHES}", default=".*")
                 fs_not_matches = typer.prompt("{$BUSINESS.FS.NOT_MATCHES}", default="")
@@ -163,13 +199,39 @@ def create_layers(
             business_tags = _parse_tags(typer.prompt("Tags BUSINESS", default=default_tags))
         else:
             business_name = business_name or "BUSINESS"
+            if template_name:
+                base_name = base_name or f"{root_name} BASE"
+                system_name = system_name or f"{root_name} SYSTEM"
+                business_template_name = business_template_name or f"{root_name} {business_name}"
+
         result = create_layered_templates(
-            source, destination, prefix=prefix, overwrite=overwrite,
-            business_name=business_name, system_tags=system_tags, business_tags=business_tags,
-            filesystem_matches=fs_matches, filesystem_not_matches=fs_not_matches,
-            service_matches=service_matches, service_not_matches=service_not_matches,
+            source,
+            destination,
+            prefix=prefix,
+            overwrite=overwrite,
+            business_name=business_name,
+            system_tags=system_tags,
+            business_tags=business_tags,
+            filesystem_matches=fs_matches,
+            filesystem_not_matches=fs_not_matches,
+            service_matches=service_matches,
+            service_not_matches=service_not_matches,
         )
-    except (FileNotFoundError, FileExistsError, PermissionError, TemplateFormatError, ValueError) as exc:
+        if any((base_name, system_name, business_template_name)):
+            result = rename_layered_templates(
+                result,
+                base_name=base_name or result.base_template,
+                system_name=system_name or result.system_template,
+                business_name=business_template_name or result.business_template,
+                overwrite=overwrite,
+            )
+    except (
+        FileNotFoundError,
+        FileExistsError,
+        PermissionError,
+        TemplateFormatError,
+        ValueError,
+    ) as exc:
         _exit_with_error(exc)
     console.print("[bold green]Layered templates created.[/bold green]")
     console.print(f"BASE     : {result.base_file} ({result.base_template})")
@@ -184,6 +246,7 @@ def create_layers(
 def create_business(
     system_file: Annotated[Path, typer.Argument(exists=False, dir_okay=False, readable=True)],
     business_name: Annotated[str | None, typer.Option("--business-name")] = None,
+    template_name: Annotated[str | None, typer.Option("--template-name")] = None,
     output_dir: Annotated[Path | None, typer.Option("--output-dir", "-o")] = None,
     interactive: Annotated[bool, typer.Option("--interactive/--no-interactive")] = False,
     filesystems: Annotated[bool, typer.Option("--filesystems/--no-filesystems")] = False,
@@ -195,8 +258,17 @@ def create_business(
         system = load_template(system_file)
         destination = output_dir if output_dir is not None else system.path.parent
         fs_matches = fs_not_matches = service_matches = service_not_matches = None
+        system_visible = str(system.template.get("name", system.template.get("template", "SYSTEM")))
+        root_visible = system_visible.removesuffix(" SYSTEM")
         if interactive:
-            business_name = typer.prompt("Nom du template BUSINESS", default=business_name or "BUSINESS")
+            business_name = typer.prompt(
+                "Libellé de la couche BUSINESS",
+                default=business_name or "BUSINESS",
+            )
+            template_name = typer.prompt(
+                "Nom complet du template BUSINESS",
+                default=template_name or f"{root_visible} {business_name}",
+            )
             filesystems = typer.confirm("Ajouter la LLD Filesystem métier ?", default=True)
             if filesystems:
                 fs_matches = typer.prompt("{$BUSINESS.FS.MATCHES}", default=".*")
@@ -219,15 +291,34 @@ def create_business(
             if services:
                 service_matches, service_not_matches = ".*", ""
         result = create_business_template(
-            system, destination, business_name=business_name, overwrite=overwrite,
-            include_filesystems=filesystems, include_services=services,
-            business_tags=tags, filesystem_matches=fs_matches,
-            filesystem_not_matches=fs_not_matches, service_matches=service_matches,
+            system,
+            destination,
+            business_name=business_name,
+            overwrite=overwrite,
+            include_filesystems=filesystems,
+            include_services=services,
+            business_tags=tags,
+            filesystem_matches=fs_matches,
+            filesystem_not_matches=fs_not_matches,
+            service_matches=service_matches,
             service_not_matches=service_not_matches,
         )
-    except (FileNotFoundError, FileExistsError, PermissionError, TemplateFormatError, ValueError) as exc:
+        if template_name:
+            result = rename_business_template(
+                result,
+                template_name=template_name,
+                overwrite=overwrite,
+            )
+    except (
+        FileNotFoundError,
+        FileExistsError,
+        PermissionError,
+        TemplateFormatError,
+        ValueError,
+    ) as exc:
         _exit_with_error(exc)
     console.print(f"[bold green]BUSINESS template created:[/bold green] {result.file}")
+    console.print(f"Template name: {result.template}")
     console.print(f"Filesystem LLD cloned: {result.filesystem_rules}")
     console.print(f"Service LLD cloned: {result.service_rules}")
     if result.skipped_service_rules:
@@ -240,7 +331,10 @@ def create_business(
 def merge(
     source_files: Annotated[list[Path], typer.Argument(help="Two or more Zabbix YAML templates.")],
     output: Annotated[Path, typer.Option("--output", "-o", help="Merged YAML output file.")],
-    conflict: Annotated[str, typer.Option("--conflict", help="error, keep-first or keep-last")] = "error",
+    conflict: Annotated[
+        str,
+        typer.Option("--conflict", help="error, keep-first or keep-last"),
+    ] = "error",
     template_name: Annotated[str | None, typer.Option("--template-name")] = None,
     apply: Annotated[bool, typer.Option("--apply", help="Write the merged file.")] = False,
     overwrite: Annotated[bool, typer.Option("--overwrite")] = False,
@@ -255,7 +349,13 @@ def merge(
             overwrite=overwrite,
             template_name=template_name,
         )
-    except (FileNotFoundError, FileExistsError, PermissionError, TemplateFormatError, ValueError) as exc:
+    except (
+        FileNotFoundError,
+        FileExistsError,
+        PermissionError,
+        TemplateFormatError,
+        ValueError,
+    ) as exc:
         _exit_with_error(exc)
 
     mode = "Simulation" if result.dry_run else "Applied"
@@ -283,7 +383,10 @@ def merge(
 @app.command("move-lld")
 def move_lld(
     source_file: Annotated[Path, typer.Argument(exists=False, dir_okay=False, readable=True)],
-    destination_file: Annotated[Path, typer.Argument(exists=False, dir_okay=False, readable=True)],
+    destination_file: Annotated[
+        Path,
+        typer.Argument(exists=False, dir_okay=False, readable=True),
+    ],
     select: Annotated[list[str] | None, typer.Option("--select", "-s")] = None,
     move_all: Annotated[bool, typer.Option("--all")] = False,
     apply: Annotated[bool, typer.Option("--apply")] = False,
@@ -292,8 +395,12 @@ def move_lld(
     """Move complete LLD rule blocks between two template exports."""
     try:
         result = move_discovery_rules(
-            load_template(source_file), load_template(destination_file), selectors=select,
-            move_all=move_all, dry_run=not apply, backup=backup,
+            load_template(source_file),
+            load_template(destination_file),
+            selectors=select,
+            move_all=move_all,
+            dry_run=not apply,
+            backup=backup,
         )
     except (FileNotFoundError, PermissionError, TemplateFormatError) as exc:
         _exit_with_error(exc)
