@@ -21,12 +21,12 @@ def _rewrite_references(value: Any, replacements: dict[str, str]) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             if isinstance(child, str):
+                if child in replacements:
+                    value[key] = replacements[child]
+                    continue
                 updated = child
-                if key == "host" and child in replacements:
-                    updated = replacements[child]
-                else:
-                    for old, new in ordered:
-                        updated = updated.replace(f"/{old}/", f"/{new}/")
+                for old, new in ordered:
+                    updated = updated.replace(f"/{old}/", f"/{new}/")
                 value[key] = updated
             else:
                 _rewrite_references(child, replacements)
@@ -35,7 +35,12 @@ def _rewrite_references(value: Any, replacements: dict[str, str]) -> None:
             _rewrite_references(child, replacements)
 
 
-def _write_renamed(path: Path, document: dict[str, Any], template_name: str, overwrite: bool) -> Path:
+def _write_renamed(
+    path: Path,
+    document: dict[str, Any],
+    template_name: str,
+    overwrite: bool,
+) -> Path:
     target = path.with_name(f"{_file_slug(template_name)}.yaml")
     if target != path and target.exists() and not overwrite:
         raise FileExistsError(f"Output file already exists: {target}")
@@ -67,10 +72,10 @@ def rename_layered_templates(
         result.business_template: names[2],
     }
     paths: list[Path] = []
-    for source_path, old_name, new_name in (
-        (result.base_file, result.base_template, names[0]),
-        (result.system_file, result.system_template, names[1]),
-        (result.business_file, result.business_template, names[2]),
+    for source_path, new_name in (
+        (result.base_file, names[0]),
+        (result.system_file, names[1]),
+        (result.business_file, names[2]),
     ):
         loaded = load_template(source_path)
         document = loaded.document
