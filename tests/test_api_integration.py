@@ -10,6 +10,9 @@ from ztt.profiles import ProfileError, ZabbixProfile, load_profiles
 from ztt.zabbix_api import ZabbixAPIClient, ZabbixAPIError
 
 
+VALID_TOKEN = "a" * 64
+
+
 def test_load_profiles_qual_and_prod(tmp_path: Path) -> None:
     config = tmp_path / "config.yaml"
     config.write_text(
@@ -38,6 +41,33 @@ def test_profile_requires_environment_token() -> None:
     profile = ZabbixProfile("qual", "https://example/api_jsonrpc.php", "MISSING_TOKEN")
     with pytest.raises(ProfileError, match="MISSING_TOKEN"):
         profile.token({})
+
+
+def test_profile_rejects_token_with_surrounding_quotes() -> None:
+    profile = ZabbixProfile("qual", "https://example/api_jsonrpc.php", "TOKEN")
+
+    with pytest.raises(ProfileError, match="surrounding quotes"):
+        profile.token({"TOKEN": f'"{VALID_TOKEN}"'})
+
+
+def test_profile_rejects_invalid_token_length() -> None:
+    profile = ZabbixProfile("qual", "https://example/api_jsonrpc.php", "TOKEN")
+
+    with pytest.raises(ProfileError, match="expected 64"):
+        profile.token({"TOKEN": "a" * 63})
+
+
+def test_profile_rejects_non_hexadecimal_token() -> None:
+    profile = ZabbixProfile("qual", "https://example/api_jsonrpc.php", "TOKEN")
+
+    with pytest.raises(ProfileError, match="hexadecimal"):
+        profile.token({"TOKEN": "g" * 64})
+
+
+def test_profile_accepts_valid_token() -> None:
+    profile = ZabbixProfile("qual", "https://example/api_jsonrpc.php", "TOKEN")
+
+    assert profile.token({"TOKEN": VALID_TOKEN}) == VALID_TOKEN
 
 
 def test_version_omits_authorization_header(monkeypatch: pytest.MonkeyPatch) -> None:
