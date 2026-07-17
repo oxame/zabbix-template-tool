@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,25 @@ class ZabbixProfile:
             raise ProfileError(
                 f"Environment variable '{self.token_env}' is not set for profile '{self.name}'."
             )
+
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in {'\"', "'"}:
+            raise ProfileError(
+                f"Environment variable '{self.token_env}' contains surrounding quotes. "
+                "Store the Zabbix API token without quote characters."
+            )
+
+        if len(token) != 64:
+            raise ProfileError(
+                f"Environment variable '{self.token_env}' has an invalid Zabbix API token length "
+                f"({len(token)} characters; expected 64)."
+            )
+
+        if re.fullmatch(r"[0-9a-fA-F]{64}", token) is None:
+            raise ProfileError(
+                f"Environment variable '{self.token_env}' is not a valid Zabbix API token: "
+                "expected 64 hexadecimal characters."
+            )
+
         return token
 
 
