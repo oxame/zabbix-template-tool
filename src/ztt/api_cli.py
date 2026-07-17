@@ -29,6 +29,15 @@ def _safe_filename(value: str) -> str:
     return cleaned.replace("/", "_").replace("\\", "_")
 
 
+def _ok(label: str, value: str | None = None) -> None:
+    suffix = f" : {value}" if value else ""
+    console.print(f"  [bold green]✓[/bold green] {label}{suffix}")
+
+
+def _warning(label: str) -> None:
+    console.print(f"  [bold yellow]⚠[/bold yellow] {label}")
+
+
 @api_app.command("profiles")
 def profiles(
     config: Annotated[
@@ -71,19 +80,43 @@ def test(
     profile_name: Annotated[str, typer.Option("--profile", "-p", help="Named Zabbix profile.")],
     config: Annotated[Path | None, typer.Option("--config")] = None,
 ) -> None:
-    """Test URL, TLS and API-token access without changing Zabbix."""
+    """Diagnose configuration, network, TLS and API-token access without changing Zabbix."""
+    console.print("[bold]Configuration[/bold]")
     try:
         profile = get_profile(profile_name, config)
-        version, template_count = ZabbixAPIClient.from_profile(profile).test_connection()
-    except (FileNotFoundError, PermissionError, ProfileError, ZabbixAPIError) as exc:
+        token = profile.token()
+    except (FileNotFoundError, PermissionError, ProfileError) as exc:
         _api_error(exc)
 
+    _ok("Configuration file", str(config or default_config_path()))
+    _ok("Profile", profile.name)
+    _ok("URL", profile.url)
+    _ok("Token variable", profile.token_env)
+    _ok("Token detected", f"{len(token)} characters")
+
+    console.print("\n[bold]Network and API[/bold]")
+    try:
+        diagnostics = ZabbixAPIClient(profile, token).diagnose_connection()
+    except ZabbixAPIError as exc:
+        _api_error(exc)
+
+    _ok("DNS resolution", ", ".join(diagnostics.addresses))
+    _ok("TCP connection", f"{diagnostics.host}:{diagnostics.port}")
+    if diagnostics.tls_enabled:
+        _ok("TLS negotiation", diagnostics.tls_protocol or "established")
+        if diagnostics.tls_verified:
+            _ok("TLS certificate verification")
+        else:
+            _warning("TLS certificate verification disabled by profile")
+    else:
+        _warning("Unencrypted HTTP profile")
+    _ok("HTTP and JSON-RPC response")
+    _ok("Public apiinfo.version", diagnostics.zabbix_version)
+    _ok("Authenticated template.get", f"{diagnostics.template_count} template(s)")
+
     environment = "PRODUCTION" if profile.production else "QUALIFICATION/OTHER"
-    console.print(f"[bold green]Connection successful[/bold green] — {profile.name}")
+    console.print(f"\n[bold green]Connection successful[/bold green] — {profile.name}")
     console.print(f"Environment : {environment}")
-    console.print(f"URL         : {profile.url}")
-    console.print(f"Zabbix      : {version}")
-    console.print(f"Templates   : {template_count}")
 
 
 @api_app.command("list-templates")
