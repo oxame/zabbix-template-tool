@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import socket
 import ssl
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from ztt.profiles import ZabbixProfile
@@ -21,6 +23,20 @@ class ZabbixTemplateSummary:
     templateid: str
     host: str
     name: str
+
+
+@dataclass(slots=True, frozen=True)
+class ConnectionDiagnostics:
+    """Successful results collected while testing every connection layer."""
+
+    host: str
+    port: int
+    addresses: tuple[str, ...]
+    tls_enabled: bool
+    tls_verified: bool
+    tls_protocol: str | None
+    zabbix_version: str
+    template_count: int
 
 
 class ZabbixAPIClient:
@@ -40,7 +56,14 @@ class ZabbixAPIClient:
             return ssl.create_default_context(cafile=str(self.profile.ca_file))
         return ssl.create_default_context()
 
-    def call(self, method: str, params: dict[str, Any] | list[Any] | None = None) -> Any:
+    def call(
+        self,
+        method: str,
+        params: dict[str, Any] | list[Any] | None = None,
+        *,
+        authenticated: bool = True,
+    ) -> Any:
+        """Call one JSON-RPC method, optionally omitting the authorization header."""
         self._request_id += 1
         payload = {
             "jsonrpc": "2.0",
@@ -48,14 +71,16 @@ class ZabbixAPIClient:
             "params": {} if params is None else params,
             "id": self._request_id,
         }
+        headers = {
+            "Content-Type": "application/json-rpc",
+            "User-Agent": "zabbix-template-tool",
+        }
+        if authenticated:
+            headers["Authorization"] = f"Bearer {self.token}"
         request = Request(
             self.profile.url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json-rpc",
-                "Authorization": f"Bearer {self.token}",
-                "User-Agent": "zabbix-template-tool",
-            },
+            headers=headers,
             method="POST",
         )
         try:
@@ -67,24 +92,25 @@ class ZabbixAPIClient:
                 raw = response.read().decode("utf-8")
         except HTTPError as exc:
             raise ZabbixAPIError(
-                f"Zabbix API returned HTTP {exc.code} for profile '{self.profile.name}'."
+                f"HTTP: Zabbix API returned status {exc.code} for profile "
+                f"'{self.profile.name}'."
             ) from exc
         except URLError as exc:
             raise ZabbixAPIError(
-                f"Cannot reach Zabbix profile '{self.profile.name}': {exc.reason}"
+                f"HTTP: cannot reach Zabbix profile '{self.profile.name}': {exc.reason}"
             ) from exc
         except TimeoutError as exc:
             raise ZabbixAPIError(
-                f"Zabbix profile '{self.profile.name}' timed out after "
+                f"HTTP: profile '{self.profile.name}' timed out after "
                 f"{self.profile.timeout:g} seconds."
             ) from exc
 
         try:
             document = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise ZabbixAPIError("Zabbix API returned invalid JSON.") from exc
+            raise ZabbixAPIError("JSON-RPC: Zabbix API returned invalid JSON.") from exc
         if not isinstance(document, dict):
-            raise ZabbixAPIError("Zabbix API returned an unexpected JSON document.")
+            raise ZabbixAPIError("JSON-RPC: Zabbix API returned an unexpected JSON document.")
         error = document.get("error")
         if isinstance(error, dict):
             code = error.get("code", "unknown")
@@ -93,11 +119,12 @@ class ZabbixAPIClient:
             suffix = f": {data}" if data else ""
             raise ZabbixAPIError(f"Zabbix API error {code}: {message}{suffix}")
         if "result" not in document:
-            raise ZabbixAPIError("Zabbix API response does not contain a result.")
+            raise ZabbixAPIError("JSON-RPC: API response does not contain a result.")
         return document["result"]
 
     def version(self) -> str:
-        result = self.call("apiinfo.version")
+        # Zabbix requires apiinfo.version to be called without authentication.
+        result = self.call("apiinfo.version", authenticated=False)
         if not isinstance(result, str):
             raise ZabbixAPIError("apiinfo.version returned an invalid value.")
         return result
@@ -148,7 +175,62 @@ class ZabbixAPIClient:
             raise ZabbixAPIError("configuration.export returned an empty or invalid document.")
         return result
 
-    def test_connection(self) -> tuple[str, int]:
+    def diagnose_connection(self) -> ConnectionDiagnostics:
+        """Test DNS, TCP, TLS, public API access and authenticated read access."""
+        parsed = urlparse(self.profile.url)
+        host = parsed.hostname
+        if not host:
+            raise ZabbixAPIError(f"Configuration: invalid API URL '{self.profile.url}'.")
+        if parsed.scheme not in {"http", "https"}:
+            raise ZabbixAPIError(
+                f"Configuration: unsupported URL scheme '{parsed.scheme or '<missing>'}'."
+            )
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+        try:
+            address_info = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except socket.gaierror as exc:
+            raise ZabbixAPIError(f"DNS: cannot resolve '{host}': {exc}.") from exc
+        addresses = tuple(dict.fromkeys(item[4][0] for item in address_info))
+
+        try:
+            connection = socket.create_connection((host, port), timeout=self.profile.timeout)
+        except TimeoutError as exc:
+            raise ZabbixAPIError(
+                f"TCP: connection to {host}:{port} timed out after "
+                f"{self.profile.timeout:g} seconds."
+            ) from exc
+        except OSError as exc:
+            raise ZabbixAPIError(f"TCP: cannot connect to {host}:{port}: {exc}.") from exc
+
+        tls_protocol: str | None = None
+        try:
+            if parsed.scheme == "https":
+                try:
+                    with self._ssl_context().wrap_socket(connection, server_hostname=host) as tls_socket:
+                        tls_protocol = tls_socket.version()
+                except ssl.SSLCertVerificationError as exc:
+                    raise ZabbixAPIError(f"TLS: certificate verification failed: {exc}.") from exc
+                except ssl.SSLError as exc:
+                    raise ZabbixAPIError(f"TLS: negotiation failed: {exc}.") from exc
+            else:
+                connection.close()
+        finally:
+            connection.close()
+
         version = self.version()
         templates = self.list_templates()
-        return version, len(templates)
+        return ConnectionDiagnostics(
+            host=host,
+            port=port,
+            addresses=addresses,
+            tls_enabled=parsed.scheme == "https",
+            tls_verified=parsed.scheme == "https" and self.profile.verify_tls,
+            tls_protocol=tls_protocol,
+            zabbix_version=version,
+            template_count=len(templates),
+        )
+
+    def test_connection(self) -> tuple[str, int]:
+        diagnostics = self.diagnose_connection()
+        return diagnostics.zabbix_version, diagnostics.template_count
