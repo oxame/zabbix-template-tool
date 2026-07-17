@@ -173,6 +173,22 @@ def _set_business_filter(
     }
 
 
+def _namespace_graph_prototype_names(rule: dict[str, Any], namespace: str) -> None:
+    """Give cloned graph prototypes names unique to their BUSINESS layer."""
+
+    graph_prototypes = rule.get("graph_prototypes", [])
+    if not isinstance(graph_prototypes, list):
+        return
+
+    suffix = f" - BUSINESS {namespace}"
+    for graph in graph_prototypes:
+        if not isinstance(graph, dict):
+            continue
+        name = graph.get("name")
+        if isinstance(name, str) and name and not name.endswith(suffix):
+            graph["name"] = f"{name}{suffix}"
+
+
 def _namespace_item_prototype_keys(rule: dict[str, Any], namespace: str) -> None:
     """Give every cloned item prototype a unique BUSINESS key."""
 
@@ -208,6 +224,7 @@ def _clone_filesystem_rule(rule: dict[str, Any], namespace: str) -> dict[str, An
         "{$BUSINESS.FS.NOT_MATCHES}",
     )
     _namespace_item_prototype_keys(clone, namespace)
+    _namespace_graph_prototype_names(clone, namespace)
     _rewrite_strings(clone, {old_key: new_key})
     return clone
 
@@ -231,6 +248,7 @@ def _clone_service_rule(rule: dict[str, Any], namespace: str) -> dict[str, Any] 
         "{$BUSINESS.SERVICE.NOT_MATCHES}",
     )
     _namespace_item_prototype_keys(clone, namespace)
+    _namespace_graph_prototype_names(clone, namespace)
     _rewrite_strings(clone, {old_key: new_key})
     return clone
 
