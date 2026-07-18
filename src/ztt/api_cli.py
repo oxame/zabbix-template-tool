@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from time import perf_counter
 from typing import Annotated
 
 import typer
@@ -12,7 +13,9 @@ from rich.console import Console
 from rich.table import Table
 
 from ztt.cli import app
+from ztt.loader import load_template
 from ztt.profiles import ProfileError, default_config_path, get_profile, load_profiles
+from ztt.template import TemplateFormatError
 from ztt.zabbix_api import ConnectionDiagnostics, ZabbixAPIClient, ZabbixAPIError
 
 console = Console()
@@ -32,6 +35,15 @@ def _safe_filename(value: str) -> str:
 
 def _format_ms(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.1f} ms"
+
+
+def _format_size(size_bytes: int) -> str:
+    size = float(size_bytes)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if size < 1024 or unit == "GiB":
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size_bytes} B"
 
 
 def _ok(label: str, value: str | None = None, duration_ms: float | None = None) -> None:
@@ -228,28 +240,88 @@ def export_template(
     ] = None,
     config: Annotated[Path | None, typer.Option("--config")] = None,
     overwrite: Annotated[bool, typer.Option("--overwrite")] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Return machine-readable JSON instead of the formatted report."),
+    ] = False,
 ) -> None:
-    """Export one template from Zabbix as a YAML file."""
+    """Export one template from Zabbix, validate it and save it as a YAML file."""
     destination = output or Path(f"{_safe_filename(template_name)}.yaml")
     if destination.exists() and not overwrite:
         _api_error(FileExistsError(f"Output file already exists: {destination}"))
+
+    total_started = perf_counter()
     try:
         profile = get_profile(profile_name, config)
+
+        api_started = perf_counter()
         document = ZabbixAPIClient.from_profile(profile).export_template(template_name)
+        api_ms = (perf_counter() - api_started) * 1000
+
+        write_started = perf_counter()
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(document, encoding="utf-8")
+        write_ms = (perf_counter() - write_started) * 1000
+
+        validation_started = perf_counter()
+        summary = load_template(destination).summary()
+        validation_ms = (perf_counter() - validation_started) * 1000
     except (
         FileNotFoundError,
         PermissionError,
         ProfileError,
+        TemplateFormatError,
         ZabbixAPIError,
         OSError,
     ) as exc:
         _api_error(exc)
 
-    console.print(f"[bold green]Template exported:[/bold green] {destination}")
-    console.print(f"Profile  : {profile.name}")
-    console.print(f"Template : {template_name}")
+    total_ms = (perf_counter() - total_started) * 1000
+    size_bytes = destination.stat().st_size
+    result = {
+        "status": "ok",
+        "profile": profile.name,
+        "template": {
+            "requested_name": template_name,
+            "technical_name": summary.template_name,
+            "visible_name": summary.visible_name,
+            "export_version": summary.export_version,
+            "items": summary.items,
+            "discovery_rules": summary.discovery_rules,
+            "triggers": summary.triggers,
+            "graphs": summary.graphs,
+            "dashboards": summary.dashboards,
+            "macros": summary.macros,
+        },
+        "output": {
+            "file": str(destination.resolve()),
+            "size_bytes": size_bytes,
+        },
+        "timings_ms": {
+            "api_export": round(api_ms, 3),
+            "write": round(write_ms, 3),
+            "validation": round(validation_ms, 3),
+            "total": round(total_ms, 3),
+        },
+    }
+
+    if json_output:
+        console.print_json(json.dumps(result, ensure_ascii=False))
+        return
+
+    console.print("[bold]Template export[/bold]")
+    _ok("API export", template_name, api_ms)
+    _ok("File written", str(destination), write_ms)
+    _ok("YAML validation", summary.template_name, validation_ms)
+    console.print()
+    console.print(f"Profile       : {profile.name}")
+    console.print(f"Technical name: {summary.template_name}")
+    console.print(f"Visible name  : {summary.visible_name}")
+    console.print(f"Version       : {summary.export_version}")
+    console.print(f"Objects       : {summary.items} items, {summary.discovery_rules} LLD, {summary.triggers} triggers")
+    console.print(f"File          : {destination.resolve()}")
+    console.print(f"Size          : {_format_size(size_bytes)}")
+    console.print(f"Total time    : {_format_ms(total_ms)}")
 
 
 if __name__ == "__main__":
