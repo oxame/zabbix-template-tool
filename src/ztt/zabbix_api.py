@@ -6,6 +6,7 @@ import json
 import socket
 import ssl
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -26,6 +27,18 @@ class ZabbixTemplateSummary:
 
 
 @dataclass(slots=True, frozen=True)
+class ConnectionTimings:
+    """Elapsed time in milliseconds for each successful diagnostic layer."""
+
+    dns_ms: float
+    tcp_ms: float
+    tls_ms: float | None
+    public_api_ms: float
+    authenticated_api_ms: float
+    total_ms: float
+
+
+@dataclass(slots=True, frozen=True)
 class ConnectionDiagnostics:
     """Successful results collected while testing every connection layer."""
 
@@ -37,6 +50,7 @@ class ConnectionDiagnostics:
     tls_protocol: str | None
     zabbix_version: str
     template_count: int
+    timings: ConnectionTimings
 
 
 class ZabbixAPIClient:
@@ -177,6 +191,7 @@ class ZabbixAPIClient:
 
     def diagnose_connection(self) -> ConnectionDiagnostics:
         """Test DNS, TCP, TLS, public API access and authenticated read access."""
+        total_started = perf_counter()
         parsed = urlparse(self.profile.url)
         host = parsed.hostname
         if not host:
@@ -187,12 +202,15 @@ class ZabbixAPIClient:
             )
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
 
+        dns_started = perf_counter()
         try:
             address_info = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         except socket.gaierror as exc:
             raise ZabbixAPIError(f"DNS: cannot resolve '{host}': {exc}.") from exc
+        dns_ms = (perf_counter() - dns_started) * 1000
         addresses = tuple(dict.fromkeys(item[4][0] for item in address_info))
 
+        tcp_started = perf_counter()
         try:
             connection = socket.create_connection((host, port), timeout=self.profile.timeout)
         except TimeoutError as exc:
@@ -202,10 +220,13 @@ class ZabbixAPIClient:
             ) from exc
         except OSError as exc:
             raise ZabbixAPIError(f"TCP: cannot connect to {host}:{port}: {exc}.") from exc
+        tcp_ms = (perf_counter() - tcp_started) * 1000
 
         tls_protocol: str | None = None
+        tls_ms: float | None = None
         try:
             if parsed.scheme == "https":
+                tls_started = perf_counter()
                 try:
                     with self._ssl_context().wrap_socket(connection, server_hostname=host) as tls_socket:
                         tls_protocol = tls_socket.version()
@@ -213,13 +234,21 @@ class ZabbixAPIClient:
                     raise ZabbixAPIError(f"TLS: certificate verification failed: {exc}.") from exc
                 except ssl.SSLError as exc:
                     raise ZabbixAPIError(f"TLS: negotiation failed: {exc}.") from exc
+                tls_ms = (perf_counter() - tls_started) * 1000
             else:
                 connection.close()
         finally:
             connection.close()
 
+        public_api_started = perf_counter()
         version = self.version()
+        public_api_ms = (perf_counter() - public_api_started) * 1000
+
+        authenticated_api_started = perf_counter()
         templates = self.list_templates()
+        authenticated_api_ms = (perf_counter() - authenticated_api_started) * 1000
+
+        total_ms = (perf_counter() - total_started) * 1000
         return ConnectionDiagnostics(
             host=host,
             port=port,
@@ -229,6 +258,14 @@ class ZabbixAPIClient:
             tls_protocol=tls_protocol,
             zabbix_version=version,
             template_count=len(templates),
+            timings=ConnectionTimings(
+                dns_ms=dns_ms,
+                tcp_ms=tcp_ms,
+                tls_ms=tls_ms,
+                public_api_ms=public_api_ms,
+                authenticated_api_ms=authenticated_api_ms,
+                total_ms=total_ms,
+            ),
         )
 
     def test_connection(self) -> tuple[str, int]:
