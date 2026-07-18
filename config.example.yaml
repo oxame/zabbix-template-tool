@@ -1,0 +1,17 @@
+profiles:
+  qual:
+    url: https://zabbix-qual.example/zabbix
+    token_env: ZTT_ZABBIX_QUAL_TOKEN
+    production: false
+    verify_tls: true
+    timeout: 30
+
+  prod:
+    url: https://zabbix-prod.example/zabbix
+    token_env: ZTT_ZABBIX_PROD_TOKEN
+    production: true
+    verify_tls: true
+    timeout: 30
+
+# Pour une autorité de certification interne :
+#    ca_file: /etc/pki/ca-trust/source/anchors/entreprise-ca.pem
