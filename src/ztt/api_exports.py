@@ -1,4 +1,4 @@
-"""Zabbix API export commands backed by the shared export service."""
+"""Zabbix API export and comparison commands."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from typing import Annotated, Callable
 import typer
 
 from ztt.api_cli import _api_error, _safe_filename, api_app, app, console
+from ztt.compare_render import render_comparison
+from ztt.compare_service import CompareService
 from ztt.export_models import ExportResult
 from ztt.export_render import render_export
 from ztt.export_service import ExportService
@@ -161,6 +163,53 @@ def export_template_group(
         overwrite=overwrite,
         json_output=json_output,
         operation=_export_template_group,
+    )
+
+
+@api_app.command("compare-template")
+def compare_template(
+    source_profile: Annotated[
+        str,
+        typer.Option("--source", "-s", help="Source Zabbix profile, for example QUAL."),
+    ],
+    target_profile: Annotated[
+        str,
+        typer.Option("--target", "-d", help="Target Zabbix profile, for example PROD."),
+    ],
+    template_name: Annotated[
+        str,
+        typer.Option("--template", "-t", help="Exact template name on both profiles."),
+    ],
+    config: Annotated[Path | None, typer.Option("--config")] = None,
+    details: Annotated[
+        bool,
+        typer.Option("--details", help="List every added, removed and modified object."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Return machine-readable JSON."),
+    ] = False,
+) -> None:
+    """Compare one template between two configured Zabbix profiles."""
+    try:
+        result = CompareService(source_profile, target_profile, config).compare_template(
+            template_name
+        )
+    except (
+        FileNotFoundError,
+        PermissionError,
+        ProfileError,
+        ZabbixAPIError,
+        OSError,
+        ValueError,
+    ) as exc:
+        _api_error(exc)
+
+    render_comparison(
+        result,
+        console,
+        json_output=json_output,
+        details=details,
     )
 
 
