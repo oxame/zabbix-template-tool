@@ -74,14 +74,20 @@ class ExportEngine:
         )
 
     def _resolve(self, target: ExportTarget, requested_name: str) -> ResolvedExportObject:
-        result = self.client.call(
-            target.lookup_method,
-            {
-                "output": [
+        output_fields = list(
+            dict.fromkeys(
+                (
                     target.id_field,
                     target.technical_name_field,
                     target.visible_name_field,
-                ],
+                )
+            )
+        )
+
+        result = self.client.call(
+            target.lookup_method,
+            {
+                "output": output_fields,
                 "search": {
                     target.technical_name_field: requested_name,
                     target.visible_name_field: requested_name,
