@@ -75,14 +75,14 @@ class CompareEngine:
             source_object = source_index.get(identity)
             target_object = target_index.get(identity)
             if source_object is None:
-                added += 1
-                differences.append(
-                    ObjectDifference(section, identity, "added", target=target_object)
-                )
-            elif target_object is None:
                 removed += 1
                 differences.append(
-                    ObjectDifference(section, identity, "removed", source=source_object)
+                    ObjectDifference(section, identity, "removed", target=target_object)
+                )
+            elif target_object is None:
+                added += 1
+                differences.append(
+                    ObjectDifference(section, identity, "added", source=source_object)
                 )
             elif self._normalise(source_object) != self._normalise(target_object):
                 modified += 1
@@ -175,7 +175,8 @@ class CompareEngine:
             template
             for template in templates
             if isinstance(template, Mapping)
-            and requested_name in {str(template.get("template", "")), str(template.get("name", ""))}
+            and requested_name
+            in {str(template.get("template", "")), str(template.get("name", ""))}
         ]
         if not matches and len(templates) == 1 and isinstance(templates[0], Mapping):
             matches = [templates[0]]
