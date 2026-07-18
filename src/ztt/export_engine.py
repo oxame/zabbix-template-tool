@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -73,6 +74,19 @@ class ExportEngine:
             ),
         )
 
+    def fetch_document(
+        self,
+        *,
+        target: ExportTarget,
+        requested_name: str,
+    ) -> tuple[ResolvedExportObject, Mapping[str, Any]]:
+        """Export and parse one object entirely in memory."""
+        resolved = self._resolve(target, requested_name)
+        document = self._export_configuration(target, resolved.object_id)
+        parsed = self._parse_document(document)
+        self._validate_parsed(parsed, target)
+        return resolved, parsed
+
     def _resolve(self, target: ExportTarget, requested_name: str) -> ResolvedExportObject:
         output_fields = list(
             dict.fromkeys(
@@ -141,15 +155,25 @@ class ExportEngine:
         return result
 
     def _validate(self, document: str, target: ExportTarget) -> ExportStatistics:
+        return self._validate_parsed(self._parse_document(document), target)
+
+    @staticmethod
+    def _parse_document(document: str) -> Mapping[str, Any]:
         try:
             parsed = YAML(typ="safe").load(document)
         except Exception as exc:
             raise ZabbixAPIError(f"Exported YAML is invalid: {exc}") from exc
-
-        if not isinstance(parsed, dict):
+        if not isinstance(parsed, Mapping):
             raise ZabbixAPIError("Exported YAML does not contain a mapping at its root.")
+        return parsed
+
+    def _validate_parsed(
+        self,
+        parsed: Mapping[str, Any],
+        target: ExportTarget,
+    ) -> ExportStatistics:
         export = parsed.get("zabbix_export")
-        if not isinstance(export, dict):
+        if not isinstance(export, Mapping):
             raise ZabbixAPIError("Exported YAML does not contain a zabbix_export section.")
         objects = export.get(target.expected_key)
         if not isinstance(objects, list) or not objects:
@@ -163,7 +187,7 @@ class ExportEngine:
                 export_version=self._optional_string(export.get("version")),
             )
 
-        template = objects[0] if isinstance(objects[0], dict) else {}
+        template = objects[0] if isinstance(objects[0], Mapping) else {}
         return ExportStatistics(
             exported_objects=len(objects),
             export_version=self._optional_string(export.get("version")),
