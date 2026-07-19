@@ -9,6 +9,18 @@ ChangeKind = Literal["added", "removed", "modified", "unchanged"]
 
 
 @dataclass(frozen=True, slots=True)
+class FieldDifference:
+    """Difference detected for one field inside a modified object."""
+
+    path: str
+    source: Any = None
+    target: Any = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class ObjectDifference:
     """Difference detected for one named object in a template section."""
 
@@ -17,9 +29,12 @@ class ObjectDifference:
     change: ChangeKind
     source: Any = None
     target: Any = None
+    fields: tuple[FieldDifference, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        result = asdict(self)
+        result["fields"] = [field_difference.to_dict() for field_difference in self.fields]
+        return result
 
 
 @dataclass(frozen=True, slots=True)
