@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from ztt.compare_models import TemplateComparisonResult
@@ -63,9 +64,15 @@ def render_comparison(
         else "[bold yellow]DIFFERENT[/bold yellow]"
     )
     console.print(f"[bold]Template comparison[/bold] — {status}")
-    console.print(f"Template : {result.template_name}")
-    console.print(f"Source   : {result.source_profile} (export {result.source_version or 'n/a'})")
-    console.print(f"Target   : {result.target_profile} (export {result.target_version or 'n/a'})")
+    console.print(f"Template : {escape(result.template_name)}")
+    console.print(
+        f"Source   : {escape(result.source_profile)} "
+        f"(export {escape(result.source_version or 'n/a')})"
+    )
+    console.print(
+        f"Target   : {escape(result.target_profile)} "
+        f"(export {escape(result.target_version or 'n/a')})"
+    )
     console.print()
 
     table = Table(title="Comparison summary")
@@ -105,7 +112,8 @@ def _render_details(result: TemplateComparisonResult, console: Console) -> None:
         if section.identical:
             continue
         console.print()
-        console.rule(f"[bold]{SECTION_LABELS.get(section.section, section.section)}[/bold]")
+        section_label = escape(SECTION_LABELS.get(section.section, section.section))
+        console.rule(f"[bold]{section_label}[/bold]")
         for difference in section.differences:
             marker, style = {
                 "added": ("+", "green"),
@@ -113,9 +121,9 @@ def _render_details(result: TemplateComparisonResult, console: Console) -> None:
                 "modified": ("~", "yellow"),
                 "unchanged": ("=", "dim"),
             }[difference.change]
-            console.print(
-                f"[{style}]{marker} {difference.identity} ({difference.change})[/{style}]"
-            )
+            identity = escape(difference.identity)
+            change = escape(difference.change)
+            console.print(f"[{style}]{marker} {identity} ({change})[/{style}]")
             if difference.change == "modified":
                 _render_field_differences(
                     difference.fields,
@@ -136,15 +144,18 @@ def _render_field_differences(
         console.print("    [dim]Object content changed.[/dim]")
         return
 
+    source_label = escape(source_profile)
+    target_label = escape(target_profile)
     for field_difference in fields:
-        label = _field_label(field_difference.path)
-        console.print(f"    [bold]{label}[/bold] [dim]({field_difference.path})[/dim]")
+        label = escape(_field_label(field_difference.path))
+        path = escape(field_difference.path)
+        console.print(f"    [bold]{label}[/bold] [dim]({path})[/dim]")
         console.print(
-            f"      [cyan]{source_profile}[/cyan] : "
+            f"      [cyan]{source_label}[/cyan] : "
             f"{_format_value(field_difference.source)}"
         )
         console.print(
-            f"      [magenta]{target_profile}[/magenta] : "
+            f"      [magenta]{target_label}[/magenta] : "
             f"{_format_value(field_difference.target)}"
         )
 
@@ -164,4 +175,4 @@ def _format_value(value: Any, *, max_length: int = 240) -> str:
     rendered = rendered.replace("\n", "\\n")
     if len(rendered) > max_length:
         rendered = f"{rendered[: max_length - 1]}…"
-    return rendered
+    return escape(rendered)
