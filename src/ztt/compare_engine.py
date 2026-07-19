@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from ztt.compare_models import (
+    FieldDifference,
     ObjectDifference,
     SectionComparison,
     TemplateComparisonResult,
@@ -84,19 +85,22 @@ class CompareEngine:
                 differences.append(
                     ObjectDifference(section, identity, "added", source=source_object)
                 )
-            elif self._normalise(source_object) != self._normalise(target_object):
-                modified += 1
-                differences.append(
-                    ObjectDifference(
-                        section,
-                        identity,
-                        "modified",
-                        source=source_object,
-                        target=target_object,
-                    )
-                )
             else:
-                unchanged += 1
+                field_differences = tuple(self._diff_fields(source_object, target_object))
+                if field_differences:
+                    modified += 1
+                    differences.append(
+                        ObjectDifference(
+                            section,
+                            identity,
+                            "modified",
+                            source=source_object,
+                            target=target_object,
+                            fields=field_differences,
+                        )
+                    )
+                else:
+                    unchanged += 1
 
         return SectionComparison(
             section=section,
@@ -108,6 +112,47 @@ class CompareEngine:
             unchanged=unchanged,
             differences=tuple(differences),
         )
+
+    def _diff_fields(
+        self,
+        source: Any,
+        target: Any,
+        path: str = "",
+    ) -> list[FieldDifference]:
+        """Return stable, human-readable leaf differences between two values."""
+        if isinstance(source, Mapping) and isinstance(target, Mapping):
+            differences: list[FieldDifference] = []
+            keys = {
+                str(key)
+                for key in source.keys() | target.keys()
+                if str(key) not in self.IGNORED_FIELDS
+            }
+            for key in sorted(keys):
+                field_path = f"{path}.{key}" if path else key
+                source_present = key in source
+                target_present = key in target
+                if not source_present:
+                    differences.append(FieldDifference(field_path, None, deepcopy(target[key])))
+                elif not target_present:
+                    differences.append(FieldDifference(field_path, deepcopy(source[key]), None))
+                else:
+                    differences.extend(
+                        self._diff_fields(source[key], target[key], field_path)
+                    )
+            return differences
+
+        if isinstance(source, list) and isinstance(target, list):
+            source_value = self._normalise(source)
+            target_value = self._normalise(target)
+            if source_value == target_value:
+                return []
+            return [FieldDifference(path or "value", source_value, target_value)]
+
+        source_value = self._normalise(source)
+        target_value = self._normalise(target)
+        if source_value == target_value:
+            return []
+        return [FieldDifference(path or "value", source_value, target_value)]
 
     def _index_objects(
         self,
