@@ -6,6 +6,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from ztt import __version__
 from ztt.business import create_business_template
@@ -131,12 +132,23 @@ def analyze(
     except (FileNotFoundError, PermissionError, TemplateFormatError) as exc:
         _exit_with_error(exc)
     for report in reports:
-        table = Table(title=f"{report.rule_name} — {report.rule_key}")
+        table = Table(
+            title=Text.assemble(
+                Text(report.rule_name),
+                " — ",
+                Text(report.rule_key),
+            )
+        )
         for column in ("Status", "Type", "Reference", "Location"):
             table.add_column(column)
         for dependency in report.dependencies:
-            status = "[green]OK[/green]" if dependency.present else "[red]MISSING[/red]"
-            table.add_row(status, dependency.kind, dependency.reference, dependency.location)
+            status = Text("OK", style="green") if dependency.present else Text("MISSING", style="red")
+            table.add_row(
+                status,
+                Text(dependency.kind),
+                Text(dependency.reference),
+                Text(dependency.location),
+            )
         console.print(table)
         if not report.dependencies:
             console.print("[dim]No external dependency detected.[/dim]")
