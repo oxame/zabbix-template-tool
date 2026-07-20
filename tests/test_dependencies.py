@@ -43,6 +43,11 @@ def test_analyze_lld_dependencies(tmp_path: Path) -> None:
               value_map:
                 name: Filesystem status
             - uuid: 66666666666666666666666666666666
+              name: Derived from prototype
+              key: fs.percent[{#FSNAME}]
+              master_item:
+                key: fs.used[{#FSNAME}]
+            - uuid: 77777777777777777777777777777777
               name: Missing dependency
               key: fs.missing[{#FSNAME}]
               master_item:
@@ -63,5 +68,6 @@ def test_analyze_lld_dependencies(tmp_path: Path) -> None:
     assert dependencies[("macro", "{$FS.CRIT}")] is False
     assert dependencies[("value_map", "Filesystem status")] is True
     assert dependencies[("master_item", "master.key")] is True
+    assert dependencies[("master_item", "fs.used[{#FSNAME}]")] is True
     assert dependencies[("master_item", "missing.master")] is False
     assert len(reports[0].missing) == 2
