@@ -47,26 +47,6 @@ class PromotionService:
             "updateExisting": True,
             "deleteMissing": True,
         },
-        "itemPrototypes": {
-            "createMissing": True,
-            "updateExisting": True,
-            "deleteMissing": True,
-        },
-        "triggerPrototypes": {
-            "createMissing": True,
-            "updateExisting": True,
-            "deleteMissing": True,
-        },
-        "graphPrototypes": {
-            "createMissing": True,
-            "updateExisting": True,
-            "deleteMissing": True,
-        },
-        "hostPrototypes": {
-            "createMissing": True,
-            "updateExisting": True,
-            "deleteMissing": True,
-        },
         "triggers": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
         "graphs": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
         "valueMaps": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
@@ -85,6 +65,12 @@ class PromotionService:
     ) -> None:
         self.source_profile = get_profile(source_profile, config)
         self.target_profile = get_profile(target_profile, config)
+        if self.source_profile.name == self.target_profile.name:
+            raise ValueError("Source and target profiles must be different.")
+        if not self.target_profile.production:
+            raise ValueError(
+                f"Target profile '{self.target_profile.name}' is not marked as production."
+            )
         self.source_client = ZabbixAPIClient.from_profile(self.source_profile)
         self.target_client = ZabbixAPIClient.from_profile(self.target_profile)
 
