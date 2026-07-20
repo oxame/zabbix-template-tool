@@ -75,15 +75,27 @@ def _template_value_maps(template: ZabbixTemplate) -> set[str]:
     }
 
 
-def _template_item_keys(template: ZabbixTemplate) -> set[str]:
-    items = template.template.get("items", [])
-    if not isinstance(items, list):
+def _object_keys(objects: Any) -> set[str]:
+    if not isinstance(objects, list):
         return set()
     return {
         str(item.get("key"))
-        for item in items
+        for item in objects
         if isinstance(item, dict) and item.get("key")
     }
+
+
+def _template_item_keys(template: ZabbixTemplate) -> set[str]:
+    """Return keys from regular items and every LLD item prototype."""
+    keys = _object_keys(template.template.get("items", []))
+    rules = template.template.get("discovery_rules", [])
+    if not isinstance(rules, list):
+        return keys
+
+    for rule in rules:
+        if isinstance(rule, dict):
+            keys.update(_object_keys(rule.get("item_prototypes", [])))
+    return keys
 
 
 def analyze_lld_dependencies(
