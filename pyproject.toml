@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-ztt = "ztt.api_exports:app"
+ztt = "ztt.main:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ztt"]
