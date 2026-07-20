@@ -148,17 +148,6 @@ Future synchronization features will also generate deployment reports and automa
 
 ---
 
-## Automation
-
-Every command has been designed to integrate easily into automation pipelines.
-
-Typical integrations include:
-
-- GitHub Actions
-- GitLab CI
-- Azure DevOps
-- Jenkins
-- Scheduled tasks
 
 ---
 
