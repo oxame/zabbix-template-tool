@@ -13,7 +13,7 @@ from time import perf_counter
 from ruamel.yaml import YAML
 
 from ztt.profiles import get_profile
-from ztt.zabbix_api import ZabbixAPIClient
+from ztt.zabbix_api import ZabbixAPIClient, ZabbixTemplateSummary
 
 
 @dataclass(slots=True, frozen=True)
@@ -37,6 +37,46 @@ class PromotionResult:
 class PromotionService:
     """Copy a template from one profile to another with backup and rollback."""
 
+    IMPORT_RULES = {
+        "template_groups": {"createMissing": True, "updateExisting": True},
+        "templates": {"createMissing": True, "updateExisting": True},
+        "templateLinkage": {"createMissing": True, "deleteMissing": True},
+        "items": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
+        "discoveryRules": {
+            "createMissing": True,
+            "updateExisting": True,
+            "deleteMissing": True,
+        },
+        "itemPrototypes": {
+            "createMissing": True,
+            "updateExisting": True,
+            "deleteMissing": True,
+        },
+        "triggerPrototypes": {
+            "createMissing": True,
+            "updateExisting": True,
+            "deleteMissing": True,
+        },
+        "graphPrototypes": {
+            "createMissing": True,
+            "updateExisting": True,
+            "deleteMissing": True,
+        },
+        "hostPrototypes": {
+            "createMissing": True,
+            "updateExisting": True,
+            "deleteMissing": True,
+        },
+        "triggers": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
+        "graphs": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
+        "valueMaps": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
+        "templateDashboards": {
+            "createMissing": True,
+            "updateExisting": True,
+            "deleteMissing": True,
+        },
+    }
+
     def __init__(
         self,
         source_profile: str,
@@ -48,11 +88,7 @@ class PromotionService:
         self.source_client = ZabbixAPIClient.from_profile(self.source_profile)
         self.target_client = ZabbixAPIClient.from_profile(self.target_profile)
 
-    def promote_template(
-        self,
-        template_name: str,
-        backup_dir: Path,
-    ) -> PromotionResult:
+    def promote_template(self, template_name: str, backup_dir: Path) -> PromotionResult:
         """Promote one template and restore the previous target export on failure."""
         started = perf_counter()
         promoted_at = datetime.now(timezone.utc)
@@ -63,7 +99,7 @@ class PromotionService:
         source_sha256 = hashlib.sha256(source_yaml.encode("utf-8")).hexdigest()
         source_export_version = self._export_version(source_yaml)
 
-        target_template = self.target_client.find_template(template_name)
+        target_template = self._find_template(self.target_client, template_name)
         target_existed = target_template is not None
         backup_file: Path | None = None
         metadata_file: Path | None = None
@@ -109,11 +145,11 @@ class PromotionService:
 
         rollback_performed = False
         try:
-            self.target_client.import_template(source_yaml)
+            self._import_template(self.target_client, source_yaml)
             self.target_client.resolve_template(template_name)
         except Exception:
             if previous_yaml is not None:
-                self.target_client.import_template(previous_yaml)
+                self._import_template(self.target_client, previous_yaml)
                 rollback_performed = True
             raise
 
@@ -133,6 +169,32 @@ class PromotionService:
         )
         self._append_history(result)
         return result
+
+    @staticmethod
+    def _find_template(
+        client: ZabbixAPIClient,
+        name: str,
+    ) -> ZabbixTemplateSummary | None:
+        exact = [item for item in client.list_templates(name) if name in {item.host, item.name}]
+        if not exact:
+            return None
+        if len(exact) > 1:
+            matches = ", ".join(f"{item.host} ({item.templateid})" for item in exact)
+            raise ValueError(f"Template name '{name}' is ambiguous: {matches}")
+        return exact[0]
+
+    @classmethod
+    def _import_template(cls, client: ZabbixAPIClient, document: str) -> None:
+        result = client.call(
+            "configuration.import",
+            {
+                "format": "yaml",
+                "rules": cls.IMPORT_RULES,
+                "source": document,
+            },
+        )
+        if result is not True:
+            raise RuntimeError("configuration.import did not confirm a successful import.")
 
     @staticmethod
     def _append_history(result: PromotionResult) -> None:
