@@ -1,0 +1,117 @@
+name: Package
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install build tools
+        run: python -m pip install --upgrade build twine
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+      - name: Check package metadata
+        run: python -m twine check dist/*
+
+      - name: Verify distribution names
+        run: |
+          test "$(find dist -maxdepth 1 -name '*.whl' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 1
+          find dist -maxdepth 1 -name '*-py3-none-any.whl' | grep -q .
+
+      - name: Inspect wheel contents
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wheel = next(Path('dist').glob('*.whl'))
+          with ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+
+          required = {
+              'ztt/__init__.py',
+              'ztt/cli.py',
+          }
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(f'Missing required wheel files: {missing}')
+
+          forbidden_fragments = (
+              '.env',
+              'config.yaml',
+              '__pycache__',
+              '.git/',
+          )
+          forbidden = sorted(
+              name for name in names
+              if any(fragment in name for fragment in forbidden_fragments)
+          )
+          if forbidden:
+              raise SystemExit(f'Forbidden files in wheel: {forbidden}')
+
+          print(f'Validated {wheel} with {len(names)} entries')
+          PY
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: zabbix-template-tool-distributions
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  install-wheel:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: zabbix-template-tool-distributions
+          path: dist
+
+      - name: Install generated wheel
+        run: python -m pip install dist/*.whl
+
+      - name: Verify installed CLI
+        run: |
+          ztt --version
+          ztt --help
+          ztt validate --help
+          ztt create-layers --help
+          ztt create-business --help
+          ztt merge --help
+
+      - name: Verify installed package metadata
+        run: |
+          python -m pip show zabbix-template-tool
+          python -m pip check
